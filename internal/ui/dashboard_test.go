@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/clishakehq/clishake/internal/domain"
 )
 
@@ -404,5 +405,35 @@ func TestMatchChatFilter(t *testing.T) {
 	}
 	if !matchChatFilter(team, "@team:reviewers") || matchChatFilter(direct, "@team:reviewers") {
 		t.Fatal("selector filter must match exact selector")
+	}
+}
+
+func TestComposerGrowsWithWrappedInput(t *testing.T) {
+	ta := textarea.New()
+	ta.ShowLineNumbers = false
+	ta.SetWidth(20)
+	ta.SetHeight(1)
+	ta.MaxHeight = maxInputRows
+	m := &model{input: ta}
+
+	m.input.SetValue("hi")
+	m.syncInputHeight()
+	if got := m.input.Height(); got != 1 {
+		t.Errorf("short input height = %d, want 1", got)
+	}
+
+	m.input.SetValue(strings.Repeat("wrap ", 40)) // wraps well past width 20
+	m.syncInputHeight()
+	if got := m.input.Height(); got < 2 {
+		t.Errorf("wrapped input height = %d, want multi-line (>1)", got)
+	}
+	if got := m.input.Height(); got > maxInputRows {
+		t.Errorf("input height = %d exceeds cap %d", got, maxInputRows)
+	}
+
+	m.input.SetValue("")
+	m.syncInputHeight()
+	if got := m.input.Height(); got != 1 {
+		t.Errorf("cleared input height = %d, want 1", got)
 	}
 }

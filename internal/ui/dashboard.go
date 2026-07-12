@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -94,7 +95,7 @@ type model struct {
 	msgs     []*domain.Message
 	tasks    []*domain.Task
 	pending  int // pending approvals
-	input    textinput.Model
+	input    textarea.Model
 	sel      int               // selected agent row
 	rows     []*domain.Agent   // flattened tree in display order
 	view     int               // current view: viewOverview | viewFocus | viewGrid
@@ -282,17 +283,52 @@ var (
 	inputBadge = lipgloss.NewStyle().Bold(true).Reverse(true).
 			Foreground(lipgloss.Color("205")).Render(" INPUT ")
 	placeholderNav   = "press i, @ or / to type…"
-	placeholderInput = "@agent message or /command…   (esc returns to navigation)"
+	placeholderInput = "@agent message or /command…   (alt+enter for a new line · esc to navigate)"
 )
+
+// maxInputRows caps how tall the multi-line composer grows before it scrolls.
+const maxInputRows = 6
+
+// syncInputHeight grows/shrinks the composer to fit its content (1..maxInputRows
+// rows), so a long line wraps into a visible box instead of scrolling off. The
+// textarea's LineCount() counts logical lines only, so we measure the wrapped
+// height ourselves (accounting for the prompt width) with lipgloss.
+func (m *model) syncInputHeight() {
+	rows := 1
+	if val := m.input.Value(); val != "" {
+		w := m.input.Width() - 2 // leave room for the "» " prompt
+		if w < 1 {
+			w = 1
+		}
+		rows = lipgloss.Height(lipgloss.NewStyle().Width(w).Render(val))
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > maxInputRows {
+		rows = maxInputRows
+	}
+	if rows != m.input.Height() {
+		m.input.SetHeight(rows)
+	}
+}
 
 // Run starts the dashboard and blocks until the user quits.
 func Run(o *orchestrator.Orchestrator) error {
-	ti := textinput.New()
-	ti.Placeholder = placeholderNav
-	ti.Prompt = "» "
-	ti.PromptStyle = dimStyle
-	ti.CharLimit = 4000
-	m := model{o: o, input: ti, view: viewOverview}
+	ta := textarea.New()
+	ta.Placeholder = placeholderNav
+	ta.Prompt = "» "
+	ta.ShowLineNumbers = false
+	ta.CharLimit = 4000
+	ta.SetHeight(1)
+	ta.MaxHeight = maxInputRows
+	// Plain Enter submits (handled in Update); a literal newline is
+	// alt/shift/ctrl+enter — so long /ask text and multi-line messages wrap
+	// and stay visible instead of scrolling off a single line.
+	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "shift+enter", "ctrl+j"))
+	ta.FocusedStyle.Prompt = titleStyle
+	ta.BlurredStyle.Prompt = dimStyle
+	m := model{o: o, input: ta, view: viewOverview}
 	m.refresh()
 	// Agents keep working while no dashboard is open; say so on reattach
 	// instead of letting mid-flight conversations look like fresh activity.
@@ -318,18 +354,16 @@ func Run(o *orchestrator.Orchestrator) error {
 func (m *model) setInputFocus(focused bool) tea.Cmd {
 	if focused {
 		m.input.Placeholder = placeholderInput
-		m.input.PromptStyle = titleStyle
 		return m.input.Focus()
 	}
 	m.input.Blur()
 	m.input.Placeholder = placeholderNav
-	m.input.PromptStyle = dimStyle
 	m.sug, m.sugSel = nil, 0
 	return nil
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), textinput.Blink)
+	return tea.Batch(tick(), textarea.Blink)
 }
 
 func tick() tea.Cmd {
@@ -578,6 +612,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// Reserve room for the mode badge + prompt so the composer wraps
+		// within the visible width instead of overflowing.
+		if w := msg.Width - 10; w > 20 {
+			m.input.SetWidth(w)
+			m.syncInputHeight()
+		}
 		return m, nil
 	case tickMsg:
 		m.refresh()
@@ -667,9 +707,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.SetValue(msg.String())
 					m.input.CursorEnd()
 				}
+				m.syncInputHeight()
 				m.sug = buildSuggestions(m.agents, m.tasks, m.input.Value())
 				m.sugSel = 0
-				return m, textinput.Blink
+				return m, textarea.Blink
 			}
 		case "up", "k":
 			if !m.input.Focused() {
@@ -752,6 +793,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.input.Focused() {
 				line := strings.TrimSpace(m.input.Value())
 				m.input.SetValue("")
+				m.syncInputHeight()
 				if line == "" {
 					return m, nil
 				}
@@ -835,12 +877,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tab":
 				m.input.SetValue(m.sug[m.sugSel] + " ")
 				m.input.CursorEnd()
+				m.syncInputHeight()
 				m.sug, m.sugSel = nil, 0
 				return m, nil
 			}
 		}
 		var cmd tea.Cmd
+		// Grow to the max height BEFORE the textarea processes the key: its
+		// viewport only re-anchors during Update and never scrolls back up once
+		// a shorter height has scrolled it off the top. Laying out against the
+		// full height keeps content that fits anchored at row 0; syncInputHeight
+		// then shrinks the box back down to hug the content.
+		m.input.SetHeight(maxInputRows)
 		m.input, cmd = m.input.Update(msg)
+		m.syncInputHeight()
 		m.sug = buildSuggestions(m.agents, m.tasks, m.input.Value())
 		if m.sugSel >= len(m.sug) {
 			m.sugSel = 0
@@ -1355,10 +1405,15 @@ func (m model) View() string {
 	if m.width == 0 {
 		return "loading…"
 	}
-	bodyH := m.height - 7
+	// 7 lines of fixed chrome, plus any extra rows the composer grew to (it
+	// is at least 1 row, so subtract only the overflow).
+	bodyH := m.height - 7 - (m.input.Height() - 1)
 	sugActive := m.input.Focused() && len(m.sug) > 0
 	if sugActive {
 		bodyH-- // the suggestion bar takes one line above the input
+	}
+	if bodyH < 3 {
+		bodyH = 3
 	}
 
 	head := titleStyle.Render(" CLIshake ▸ "+viewName(m.view)+" ") +
