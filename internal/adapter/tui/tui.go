@@ -43,6 +43,12 @@ type Spec struct {
 	// option "model_flag" overrides it, and setting it to "" disables model
 	// selection for a harness that has no such flag.
 	ModelFlag string
+	// PermissionFlags maps a cross-harness permission profile (auto|full|plan)
+	// to the harness's own launch flags, e.g. {"full": "--allow-all-tools"}.
+	// A per-agent "perm_<profile>" config overrides an entry. Harnesses whose
+	// flags we don't know leave this empty (the profile is then a no-op —
+	// honest, and set-able via config).
+	PermissionFlags map[string]string
 }
 
 // DefaultPromptGlyphs cover the composer prompts of common TUI agents.
@@ -119,6 +125,17 @@ func (a *A) BuildLaunch(ag *domain.Agent, projectDir string) (adapter.LaunchSpec
 		if flag != "" {
 			cmd = append(cmd, strings.Fields(flag)...)
 			cmd = append(cmd, m)
+		}
+	}
+	// Permissions: map the cross-harness profile to this harness's flags,
+	// overridable per agent with "perm_<profile>".
+	if p := ag.Config["permissions"]; p != "" && p != "default" {
+		flags := a.spec.PermissionFlags[p]
+		if f, ok := ag.Config["perm_"+p]; ok {
+			flags = f
+		}
+		if flags != "" {
+			cmd = append(cmd, strings.Fields(flags)...)
 		}
 	}
 	if extra := ag.Config["args"]; extra != "" {

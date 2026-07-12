@@ -39,6 +39,10 @@ func buildRegistry() *adapter.Registry {
 	reg.Register(adaptertui.New(adaptertui.Spec{
 		Name:    "copilot",
 		Command: "copilot",
+		// Copilot CLI auto-approves tool calls with --allow-all-tools; map the
+		// auto/full permission profiles to it (override per agent with
+		// perm_auto / perm_full config).
+		PermissionFlags: map[string]string{"auto": "--allow-all-tools", "full": "--allow-all-tools --allow-all-paths"},
 	}))
 	reg.Register(adaptertui.New(adaptertui.Spec{
 		Name:    "antigravity",

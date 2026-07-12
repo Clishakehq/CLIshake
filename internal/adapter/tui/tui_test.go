@@ -156,3 +156,23 @@ func TestBuildLaunchModelSelection(t *testing.T) {
 		t.Fatalf("empty model_flag should omit the model: %q", got)
 	}
 }
+
+func TestBuildLaunchPermissionProfiles(t *testing.T) {
+	sp := spec()
+	sp.PermissionFlags = map[string]string{"full": "--allow-all-tools"}
+	join := func(cfg map[string]string) string {
+		ls, _ := New(sp).BuildLaunch(&domain.Agent{Name: "a", WorkDir: "/proj", Config: cfg}, "/proj")
+		return strings.Join(ls.Command, " ")
+	}
+	if got := join(map[string]string{"permissions": "full"}); !strings.Contains(got, "--allow-all-tools") {
+		t.Errorf("spec PermissionFlags[full]: %q", got)
+	}
+	// unknown profile for this harness → no-op (honest)
+	if got := join(map[string]string{"permissions": "auto"}); strings.Contains(got, "--allow-all-tools") {
+		t.Errorf("auto not mapped for this spec, should be no-op: %q", got)
+	}
+	// per-agent perm_<profile> config overrides
+	if got := join(map[string]string{"permissions": "auto", "perm_auto": "--yolo"}); !strings.Contains(got, "--yolo") {
+		t.Errorf("perm_auto override: %q", got)
+	}
+}

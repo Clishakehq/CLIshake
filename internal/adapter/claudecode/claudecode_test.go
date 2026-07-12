@@ -95,3 +95,21 @@ func TestBuildLaunchIncludesModel(t *testing.T) {
 		t.Fatalf("expected --model claude-fable-5 in launch, got %q", got)
 	}
 }
+
+func TestBuildLaunchPermissionProfiles(t *testing.T) {
+	cases := map[string]string{"auto": "--permission-mode acceptEdits", "full": "--dangerously-skip-permissions", "plan": "--permission-mode plan"}
+	for profile, want := range cases {
+		a := &domain.Agent{Name: "claude", WorkDir: "/proj", Config: map[string]string{"permissions": profile}}
+		spec, _ := New().BuildLaunch(a, "/proj")
+		if got := strings.Join(spec.Command, " "); !strings.Contains(got, want) {
+			t.Errorf("permissions=%s: want %q in %q", profile, want, got)
+		}
+	}
+	// default adds no permission flag; raw permission_mode overrides the profile
+	a := &domain.Agent{Name: "c", WorkDir: "/proj", Config: map[string]string{"permissions": "full", "permission_mode": "plan"}}
+	spec, _ := New().BuildLaunch(a, "/proj")
+	got := strings.Join(spec.Command, " ")
+	if !strings.Contains(got, "--permission-mode plan") || strings.Contains(got, "bypassPermissions") {
+		t.Errorf("raw permission_mode should win: %q", got)
+	}
+}

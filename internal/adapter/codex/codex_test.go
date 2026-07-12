@@ -78,3 +78,14 @@ func TestBuildLaunchIncludesModel(t *testing.T) {
 		t.Fatalf("expected --model gpt-5-codex in launch, got %q", got)
 	}
 }
+
+func TestBuildLaunchPermissionProfiles(t *testing.T) {
+	cases := map[string]string{"auto": "--sandbox workspace-write --ask-for-approval never", "full": "--dangerously-bypass-approvals-and-sandbox", "plan": "--sandbox read-only"}
+	for profile, want := range cases {
+		a := &domain.Agent{Name: "codex", WorkDir: "/proj", Config: map[string]string{"permissions": profile}}
+		spec, _ := New().BuildLaunch(a, "/proj")
+		if got := strings.Join(spec.Command, " "); !strings.Contains(got, want) {
+			t.Errorf("permissions=%s: want %q in %q", profile, want, got)
+		}
+	}
+}

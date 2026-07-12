@@ -61,6 +61,9 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 	if m := a.Config["model"]; m != "" {
 		cmd = append(cmd, "--model", m)
 	}
+	// Permissions: cross-harness profile → Codex sandbox/approval flags, so
+	// agents don't stop for approvals mid-run.
+	cmd = append(cmd, codexPermArgs(a.Config["permissions"])...)
 	if extra := a.Config["args"]; extra != "" {
 		cmd = append(cmd, strings.Fields(extra)...)
 	}
@@ -77,6 +80,24 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 		wd = projectDir
 	}
 	return adapter.LaunchSpec{Command: cmd, WorkDir: wd}, nil
+}
+
+// codexPermArgs maps a cross-harness permission profile onto Codex's real
+// sandbox/approval flags (validated against `codex --help`). Unknown/empty/
+// "default" adds nothing (Codex asks as usual). "plan" is read-only; "auto"
+// edits the workspace without prompting but stays sandboxed; "full" removes
+// both the sandbox and approvals.
+func codexPermArgs(profile string) []string {
+	switch profile {
+	case "auto":
+		return []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
+	case "full":
+		return []string{"--dangerously-bypass-approvals-and-sandbox"}
+	case "plan":
+		return []string{"--sandbox", "read-only"}
+	default:
+		return nil
+	}
 }
 
 func (*A) InputMode() adapter.InputMode { return adapter.InputSendKeys }

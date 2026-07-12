@@ -79,8 +79,13 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 	if m := a.Config["model"]; m != "" {
 		cmd = append(cmd, "--model", m)
 	}
+	// Permissions: the raw permission_mode config wins as a low-level
+	// override; otherwise map the cross-harness `permissions` profile
+	// (default|auto|full|plan) so agents don't re-prompt for approval.
 	if m := a.Config["permission_mode"]; m != "" {
 		cmd = append(cmd, "--permission-mode", m)
+	} else {
+		cmd = append(cmd, claudePermArgs(a.Config["permissions"])...)
 	}
 	// Session briefing (identity, roster, messaging protocol) composed by
 	// the orchestrator rides in as an appended system prompt so the
@@ -100,6 +105,26 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 		wd = projectDir
 	}
 	return adapter.LaunchSpec{Command: cmd, WorkDir: wd}, nil
+}
+
+// claudePermArgs maps a cross-harness permission profile onto Claude Code's
+// launch flags (validated against `claude --help`). "auto" auto-accepts edits;
+// "full" uses --dangerously-skip-permissions to bypass in-session tool prompts;
+// "plan" is read-only planning. Unknown/empty/"default" adds nothing.
+//
+// NOTE: none of these skip the one-time-per-directory folder-trust dialog —
+// that is a separate startup gate the orchestrator answers (a/A/d).
+func claudePermArgs(profile string) []string {
+	switch profile {
+	case "auto":
+		return []string{"--permission-mode", "acceptEdits"}
+	case "full":
+		return []string{"--dangerously-skip-permissions"}
+	case "plan":
+		return []string{"--permission-mode", "plan"}
+	default:
+		return nil
+	}
 }
 
 func (*A) InputMode() adapter.InputMode { return adapter.InputSendKeys }

@@ -191,7 +191,7 @@ func newAgentsCmd() *cobra.Command {
 func newAgentCmd() *cobra.Command {
 	agentCmd := &cobra.Command{Use: "agent", Short: "Manage individual agents"}
 
-	var role, adapterName, task, team, model string
+	var role, adapterName, task, team, model, permissions string
 	var noStart bool
 	addCmd := &cobra.Command{
 		Use:   "add <name>",
@@ -207,9 +207,20 @@ func newAgentCmd() *cobra.Command {
 				return err
 			}
 			defer o.Close()
+			switch permissions {
+			case "", "default", "auto", "full", "plan":
+			default:
+				return fmt.Errorf("--permissions must be one of default|auto|full|plan (got %q)", permissions)
+			}
 			var cfg map[string]string
-			if model != "" {
-				cfg = map[string]string{"model": model}
+			if model != "" || permissions != "" {
+				cfg = map[string]string{}
+				if model != "" {
+					cfg["model"] = model
+				}
+				if permissions != "" {
+					cfg["permissions"] = permissions
+				}
 			}
 			a, err := o.AddAgent(orchestrator.AgentSpec{
 				Name: args[0], Role: role, Adapter: adapterName, Task: task, Team: team, Config: cfg,
@@ -231,6 +242,7 @@ func newAgentCmd() *cobra.Command {
 	addCmd.Flags().StringVar(&role, "role", "", "agent role (e.g. backend, reviewer)")
 	addCmd.Flags().StringVar(&adapterName, "adapter", "", "harness adapter (default from config)")
 	addCmd.Flags().StringVar(&model, "model", "", "harness model to launch with (e.g. opus, sonnet, claude-fable-5)")
+	addCmd.Flags().StringVar(&permissions, "permissions", "", "permission profile: default | auto | full | plan (fewer approval prompts)")
 	addCmd.Flags().StringVar(&task, "task", "", "initial task description")
 	addCmd.Flags().StringVar(&team, "team", "", "team name")
 	addCmd.Flags().BoolVar(&noStart, "no-start", false, "register without starting")
