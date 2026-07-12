@@ -31,7 +31,7 @@ var whitelist = map[string]commandSpec{
 		subcommands: []string{"add", "start", "stop", "restart", "remove"},
 		subRequired: true,
 		flags: map[string][]string{
-			"add": {"--adapter", "--role", "--task", "--team", "--no-start"},
+			"add": {"--adapter", "--role", "--task", "--team", "--no-start", "--model"},
 		},
 	},
 	"send":      {},
@@ -60,7 +60,7 @@ var whitelist = map[string]commandSpec{
 // BuildPrompt.
 func whitelistDoc() []string {
 	return []string{
-		`agent add <name> [--adapter NAME] [--role ROLE] [--task "..."] [--team NAME] [--no-start]`,
+		`agent add <name> [--adapter NAME] [--model NAME] [--role ROLE] [--task "..."] [--team NAME] [--no-start]`,
 		"agent start <name>",
 		"agent stop <name>",
 		"agent restart <name>",

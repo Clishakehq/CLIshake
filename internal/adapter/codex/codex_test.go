@@ -67,3 +67,14 @@ func TestFormatInputPrefixesSender(t *testing.T) {
 		t.Fatalf("FormatInput = %q", got)
 	}
 }
+
+func TestBuildLaunchIncludesModel(t *testing.T) {
+	a := &domain.Agent{Name: "codex", WorkDir: "/proj", Config: map[string]string{"model": "gpt-5-codex"}}
+	spec, err := New().BuildLaunch(a, "/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(spec.Command, " "); !strings.Contains(got, "--model gpt-5-codex") {
+		t.Fatalf("expected --model gpt-5-codex in launch, got %q", got)
+	}
+}

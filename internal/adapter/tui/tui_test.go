@@ -134,3 +134,25 @@ func TestDetectReadyDialogVetoesEvenWithComposerVisible(t *testing.T) {
 		t.Fatal("dialog veto must outrank config markers")
 	}
 }
+
+func TestBuildLaunchModelSelection(t *testing.T) {
+	join := func(ag *domain.Agent) string {
+		ls, err := New(spec()).BuildLaunch(ag, "/proj")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(ls.Command, " ")
+	}
+	// default flag is --model
+	if got := join(&domain.Agent{Name: "a", WorkDir: "/proj", Config: map[string]string{"model": "sonnet"}}); !strings.Contains(got, "--model sonnet") {
+		t.Fatalf("default model flag: %q", got)
+	}
+	// model_flag overrides the flag name
+	if got := join(&domain.Agent{Name: "a", WorkDir: "/proj", Config: map[string]string{"model": "x", "model_flag": "-m"}}); !strings.Contains(got, "-m x") {
+		t.Fatalf("custom model flag: %q", got)
+	}
+	// empty model_flag disables model selection for a harness without one
+	if got := join(&domain.Agent{Name: "a", WorkDir: "/proj", Config: map[string]string{"model": "x", "model_flag": ""}}); strings.Contains(got, " x") {
+		t.Fatalf("empty model_flag should omit the model: %q", got)
+	}
+}

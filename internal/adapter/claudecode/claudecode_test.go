@@ -84,3 +84,14 @@ func TestDetectReadyDistinguishesComposerFromDialogs(t *testing.T) {
 		t.Fatal("banner-only output must not be ready")
 	}
 }
+
+func TestBuildLaunchIncludesModel(t *testing.T) {
+	a := &domain.Agent{Name: "claude", WorkDir: "/proj", Config: map[string]string{"model": "claude-fable-5"}}
+	spec, err := New().BuildLaunch(a, "/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(spec.Command, " "); !strings.Contains(got, "--model claude-fable-5") {
+		t.Fatalf("expected --model claude-fable-5 in launch, got %q", got)
+	}
+}

@@ -39,6 +39,10 @@ type Spec struct {
 	PromptGlyphs []string
 	// InterruptKeys are the graceful-interrupt keys (default: Escape).
 	InterruptKeys []string
+	// ModelFlag selects a model at launch (default "--model"); the config
+	// option "model_flag" overrides it, and setting it to "" disables model
+	// selection for a harness that has no such flag.
+	ModelFlag string
 }
 
 // DefaultPromptGlyphs cover the composer prompts of common TUI agents.
@@ -57,6 +61,9 @@ func New(spec Spec) *A {
 	}
 	if len(spec.VersionArgs) == 0 {
 		spec.VersionArgs = []string{"--version"}
+	}
+	if spec.ModelFlag == "" {
+		spec.ModelFlag = "--model" // the common case; per-agent "model_flag" config overrides
 	}
 	return &A{spec: spec}
 }
@@ -100,6 +107,19 @@ func (a *A) BuildLaunch(ag *domain.Agent, projectDir string) (adapter.LaunchSpec
 	cmd := []string{a.spec.Command}
 	if bin := ag.Config["command"]; bin != "" {
 		cmd = []string{bin}
+	}
+	// Model selection: `<model_flag> <model>` when a model is set. The flag
+	// defaults to "--model" and is overridable (or disabled with "") via the
+	// "model_flag" config for a harness that names it differently.
+	if m := ag.Config["model"]; m != "" {
+		flag := a.spec.ModelFlag
+		if f, ok := ag.Config["model_flag"]; ok {
+			flag = f
+		}
+		if flag != "" {
+			cmd = append(cmd, strings.Fields(flag)...)
+			cmd = append(cmd, m)
+		}
 	}
 	if extra := ag.Config["args"]; extra != "" {
 		cmd = append(cmd, strings.Fields(extra)...)

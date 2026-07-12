@@ -74,6 +74,11 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 	if bin := a.Config["command"]; bin != "" {
 		cmd = []string{bin}
 	}
+	// Model selection (e.g. "opus", "sonnet", "claude-fable-5") — set via
+	// `clishake agent add --model` or the agent's `model` config.
+	if m := a.Config["model"]; m != "" {
+		cmd = append(cmd, "--model", m)
+	}
 	if m := a.Config["permission_mode"]; m != "" {
 		cmd = append(cmd, "--permission-mode", m)
 	}

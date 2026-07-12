@@ -57,6 +57,10 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 	if bin := a.Config["command"]; bin != "" {
 		cmd = []string{bin}
 	}
+	// Model selection (flags must precede the positional briefing prompt).
+	if m := a.Config["model"]; m != "" {
+		cmd = append(cmd, "--model", m)
+	}
 	if extra := a.Config["args"]; extra != "" {
 		cmd = append(cmd, strings.Fields(extra)...)
 	}

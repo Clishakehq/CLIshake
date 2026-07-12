@@ -54,6 +54,16 @@ func (o *Orchestrator) AddAgent(spec AgentSpec) (*domain.Agent, error) {
 		}
 		if spec.Config == nil {
 			spec.Config = t.Config
+		} else if t.Config != nil {
+			// Merge: template config is the base, spec (e.g. --model) overrides.
+			merged := map[string]string{}
+			for k, v := range t.Config {
+				merged[k] = v
+			}
+			for k, v := range spec.Config {
+				merged[k] = v
+			}
+			spec.Config = merged
 		}
 		break
 	}
