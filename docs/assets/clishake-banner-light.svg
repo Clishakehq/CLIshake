@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="528" height="188" viewBox="0 0 528 188" xml:space="preserve">
+  <style>
+    text { font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace; font-size: 16px; white-space: pre; }
+    .l { fill: #0891b2; }
+    .r { fill: #c026d3; }
+    .c { fill: #111827; font-weight: bold; }
+    .t { fill: #6b7280; font-size: 12.5px; }
+  </style>
+  <text x="40" y="28" xml:space="preserve"><tspan class="l">  ____ _     ___     </tspan><tspan class="r">_           _        </tspan></text>
+  <text x="40" y="47" xml:space="preserve"><tspan class="l"> / ___| |   |_ _|___|</tspan><tspan class="r"> |__   __ _| | _____ </tspan></text>
+  <text x="40" y="66" xml:space="preserve"><tspan class="l">| |   | |    | |/ __|</tspan><tspan class="r"> '_ \ / _` | |/ / _ \</tspan></text>
+  <text x="40" y="85" xml:space="preserve"><tspan class="l">| |___| |___ | |\__ \</tspan><tspan class="r"> | | | (_| |   &lt;  __/</tspan></text>
+  <text x="40" y="104" xml:space="preserve"><tspan class="l"> \____|_____|___|___/</tspan><tspan class="r">_| |_|\__,_|_|\_\___|</tspan></text>
+  <text x="40" y="138" xml:space="preserve"><tspan class="l">❯❯ ───────────────</tspan><tspan class="c">┤├</tspan><tspan class="r">─────────────── ❮❮</tspan></text>
+  <text x="40" y="166" class="t" xml:space="preserve">the terminal coordination layer for collaborating coding agents</text>
+</svg>

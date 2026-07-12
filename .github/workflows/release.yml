@@ -1,0 +1,36 @@
+name: release
+
+# Publishes a release whenever a version tag is pushed:
+#   git tag v0.2.0 && git push origin v0.2.0
+# GoReleaser builds the binaries, creates the GitHub Release, and updates the
+# Homebrew formula in clishakehq/homebrew-clishake. No manual steps per release.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub Release + upload archives
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser needs full history + tags
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          # GITHUB_TOKEN publishes the release in THIS repo.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # HOMEBREW_TAP_GITHUB_TOKEN pushes the formula to the separate tap
+          # repo. Create it once (Settings > Secrets) — see docs/RELEASING.md.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

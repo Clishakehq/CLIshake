@@ -1,0 +1,93 @@
+# Release automation for clishake.
+#
+# Runs in CI on tag push (see .github/workflows/release.yml): it builds the
+# cross-platform binaries, publishes a GitHub Release with archives +
+# checksums, AND updates the Homebrew formula in the clishakehq/homebrew-clishake
+# tap. Nothing here runs on a normal push — only on a v* tag.
+#
+# Validate changes locally with:  goreleaser check
+# Dry-run a release without publishing:  goreleaser release --snapshot --clean
+#
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: clishake
+
+builds:
+  - id: clishake
+    main: ./cmd/clishake
+    binary: clishake
+    env:
+      - CGO_ENABLED=0 # pure-Go sqlite (modernc) — no cgo, clean cross-compile
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/clishakehq/clishake/internal/cli.Version={{ .Version }}
+
+archives:
+  - id: clishake
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    # Ship license + attribution alongside the binary. Listing files here
+    # replaces GoReleaser's defaults, so the usual LICENSE/README are named
+    # explicitly. THIRD-PARTY-NOTICES.md satisfies the MIT/BSD/Apache notice-
+    # retention terms of our dependencies in the distributed archive.
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - THIRD-PARTY-NOTICES.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+# Homebrew tap. GoReleaser commits Casks/clishake.rb to the tap repo on every
+# release, so `brew upgrade clishake` always tracks the latest tag. A Cask (not
+# a formula) is how Homebrew ships pre-built binaries. Since Homebrew 6.0.0
+# (brew#19121) casks install on Linux too, so this one cask serves macOS AND
+# Linux/WSL — the generated file carries both on_macos and on_linux binaries
+# (Linux users install with an explicit `--cask`). No separate formula needed.
+# Requires a HOMEBREW_TAP_GITHUB_TOKEN secret (a PAT with contents:write on the
+# tap repo) — the default CI token can't push to a different repo.
+homebrew_casks:
+  - name: clishake
+    repository:
+      owner: clishakehq
+      name: homebrew-clishake
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://clishake.dev"
+    description: "The terminal coordination layer for collaborating coding agents"
+    binaries:
+      - clishake
+    commit_author:
+      name: clishake-releaser
+      email: hello@clishake.dev
+    commit_msg_template: "clishake {{ .Tag }}"
+    # The binary is unsigned; strip the macOS Gatekeeper quarantine bit on
+    # install so `clishake` runs without a security prompt.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/clishake"]
+          end

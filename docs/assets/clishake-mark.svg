@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <style>
+    text { font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace; font-weight: bold; }
+  </style>
+  <rect width="256" height="256" rx="48" fill="#1b1e28"/>
+  <text x="128" y="148" font-size="64" text-anchor="middle" xml:space="preserve"><tspan fill="#5fd7ff">❯</tspan><tspan fill="#ffffff">┤├</tspan><tspan fill="#ff87ff">❮</tspan></text>
+</svg>

@@ -1,0 +1,3 @@
+*.gif -text -diff
+*.svg text
+docs/assets/tapes/*.tape text

@@ -1,0 +1,13 @@
+/clishake
+/dist/
+.clishake/state.db
+.clishake/state.db-*
+.clishake/events.jsonl
+.clishake/agents/
+.clishake/worktrees/
+.clishake/logs/
+*.test
+coverage.out
+.claude/
+.clishake/
+.DS_Store

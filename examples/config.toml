@@ -1,0 +1,95 @@
+# Example .clishake/config.toml — copy into your project's .clishake/ and
+# adjust. Every key shown here has a sensible default; an empty file (or no
+# file) is valid.
+
+[project]
+# Used in the tmux session name: <session_prefix><name>. Defaults to the
+# project directory's basename.
+name = "myproject"
+
+[tmux]
+# Dedicated tmux server socket (tmux -L <socket>). clishake never touches
+# sessions outside this socket. Change it to fully isolate several clishake
+# installations from each other.
+socket = "clishake"
+session_prefix = "clishake-"
+
+[defaults]
+# Workspace strategy for editing agents:
+#   "worktree" (default) — dedicated git worktree + branch clishake/<agent>
+#   "shared"             — everyone works in the project root (opt-in; no
+#                          silent-overwrite protection beyond detection)
+workspace = "worktree"
+# Adapter used when `agent add` has no --adapter flag: mock | claude-code | codex
+adapter = "mock"
+
+[defaults.restart]
+# never | on-failure | always
+mode = "on-failure"
+max_restarts = 3   # within window_sec, then permanently failed (crash loop)
+window_sec = 300
+backoff_sec = 2    # doubles per consecutive restart
+
+# Default permission profile for new agents (override per agent/template).
+# clishake enforces what flows through it (messaging, worktree assignment,
+# approval gates); harness-internal actions are governed by the harness's
+# own controls — see docs/workspace-and-permissions.md.
+[defaults.permissions]
+read_files = true
+modify_files = true
+run_commands = true
+network_access = false
+use_git = true
+commit_changes = true
+merge_changes = false
+delete_files = false
+modify_config = false
+spawn_subagents = true
+send_messages = true
+access_secrets = false
+outside_project = false
+
+[logging]
+level = "info"   # debug | info | warn | error
+
+# Per-adapter settings. `command` overrides the executable; `args` are
+# appended to the launch command; `options` are adapter-specific.
+[adapters.claude-code]
+enabled = true
+command = "claude"
+# Pre-approving Bash lets the agent answer teammates/the lead via
+# `clishake send` without a permission prompt.
+args = ["--allowedTools", "Bash"]
+[adapters.claude-code.options]
+permission_mode = "acceptEdits"   # default | acceptEdits | plan | bypassPermissions
+enter_delay_ms = "400"            # pause between typed message and Enter
+
+[adapters.codex]
+enabled = true
+command = "codex"
+[adapters.codex.options]
+enter_delay_ms = "400"
+
+# Agent templates: predefine agents so `clishake agent add <name>` needs no
+# flags. (Secrets NEVER go here — this file is committed with your project.)
+[[agents]]
+name = "builder"
+role = "backend"
+adapter = "mock"
+task = "Implement the API changes"
+
+[[agents]]
+name = "reviewer"
+role = "reviewer"
+adapter = "mock"
+task = "Review changes on the builder branch"
+[agents.permissions]
+read_files = true
+modify_files = false   # read-only reviewer: runs in the project root
+run_commands = true
+send_messages = true
+
+[approval]
+# Action classes that should request lead approval before proceeding
+# (honored by adapters/agents with structured output; advisory for others).
+require_for = ["merge", "delete", "network"]
