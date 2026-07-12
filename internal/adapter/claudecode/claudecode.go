@@ -113,7 +113,10 @@ func (*A) BuildLaunch(a *domain.Agent, projectDir string) (adapter.LaunchSpec, e
 // "plan" is read-only planning. Unknown/empty/"default" adds nothing.
 //
 // NOTE: none of these skip the one-time-per-directory folder-trust dialog —
-// that is a separate startup gate the orchestrator answers (a/A/d).
+// that is a separate startup gate the orchestrator auto-answers. "full" also
+// makes Claude show a one-time "Bypass Permissions mode" danger warning
+// (default cursor on "No, exit"); clishake deliberately does NOT auto-accept a
+// danger acknowledgement — answer it once from the dashboard, or prefer "auto".
 func claudePermArgs(profile string) []string {
 	switch profile {
 	case "auto":

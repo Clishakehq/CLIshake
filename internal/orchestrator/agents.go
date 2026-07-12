@@ -411,6 +411,7 @@ func (o *Orchestrator) respawn(a *domain.Agent) (*domain.Agent, error) {
 	if a.Config != nil {
 		delete(a.Config, briefedKey)
 		delete(a.Config, readyAtKey)
+		delete(a.Config, trustAnsweredKey) // a respawned worktree may re-prompt for trust
 		a.Config[restartedKey] = "1"
 	}
 	o.mu.Lock()

@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/clishakehq/clishake/internal/adapter"
+	"github.com/clishakehq/clishake/internal/ansi"
 	"github.com/clishakehq/clishake/internal/domain"
 	"github.com/clishakehq/clishake/internal/tmux"
 )
@@ -193,7 +195,71 @@ func (o *Orchestrator) checkStartingReady(a *domain.Agent, paneByID map[string]t
 		o.setStatus(a, domain.StatusReady, "composer visible on rendered screen")
 		o.emit(domain.EvAgentReady, a.Name, a.Name, nil)
 		o.onAgentReady(a)
+		return
 	}
+	// Not ready — the harness may be blocked on the one-time folder-trust
+	// dialog. Every agent runs in its own worktree, so this would otherwise
+	// prompt once per agent; clear it automatically (opt out per agent with
+	// auto_trust=false).
+	o.maybeAnswerTrust(a, screen)
+}
+
+// trustAnsweredKey guards against re-pressing Enter on a trust dialog while
+// it is still on screen; cleared on respawn so a fresh worktree re-answers.
+const trustAnsweredKey = "_trust_answered"
+
+// maybeAnswerTrust accepts a folder-trust selection dialog (option 1 "Yes")
+// with Enter. It fires only when a numbered selection dialog whose text
+// mentions "trust" is on screen — never a generic dialog — so the choice is
+// always the safe "trust this folder" for a worktree derived from the lead's
+// own project.
+func (o *Orchestrator) maybeAnswerTrust(a *domain.Agent, screen string) {
+	if a.Config[trustAnsweredKey] == "1" || a.Tmux.PaneID == "" {
+		return
+	}
+	if o.launchView(a).Config["auto_trust"] == "false" {
+		return
+	}
+	if !trustDialogUp(ansi.Strip(screen)) {
+		return
+	}
+	// The cursor defaults to option 1 ("Yes, trust"); Enter confirms it.
+	if err := o.Tmux.SendKeys(a.Tmux.PaneID, "Enter"); err != nil {
+		return
+	}
+	if a.Config == nil {
+		a.Config = map[string]string{}
+	}
+	a.Config[trustAnsweredKey] = "1"
+	_ = o.Store.SaveAgent(a)
+	o.emit(domain.EvAgentStatusChanged, "clishake", a.Name, map[string]any{"auto_trusted": true})
+}
+
+// trustDialogUp reports whether the rendered (ANSI-stripped) screen shows a
+// folder-trust selection dialog: a prompt-glyph cursor on a numbered menu
+// entry, on a screen whose text mentions "trust".
+func trustDialogUp(plain string) bool {
+	if !strings.Contains(strings.ToLower(plain), "trust") {
+		return false
+	}
+	for _, glyph := range []string{"❯", "›", ">", "┃"} {
+		rest := plain
+		for {
+			i := strings.Index(rest, glyph)
+			if i < 0 {
+				break
+			}
+			rest = strings.TrimLeft(rest[i+len(glyph):], " ")
+			d := 0
+			for d < len(rest) && rest[d] >= '0' && rest[d] <= '9' {
+				d++
+			}
+			if d > 0 && d < len(rest) && rest[d] == '.' {
+				return true // "❯ 1." — a selection dialog cursor
+			}
+		}
+	}
+	return false
 }
 
 // RunSupervisor polls until ctx is done. overlapEvery controls how often
