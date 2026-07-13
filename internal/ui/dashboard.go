@@ -63,6 +63,9 @@ func agentStyle(name string) lipgloss.Style {
 
 type tickMsg time.Time
 
+// deliverTickMsg drives the fast queued-message delivery pump (deliverInterval).
+type deliverTickMsg time.Time
+
 // askPlanMsg carries the result of a background /ask translation.
 type askPlanMsg struct {
 	plan    ask.Plan
@@ -363,11 +366,22 @@ func (m *model) setInputFocus(focused bool) tea.Cmd {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), textarea.Blink)
+	return tea.Batch(tick(), deliverTick(), textarea.Blink)
 }
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// deliverInterval is how often the composer-delivery pump runs. It is much
+// faster than the 1s supervision tick so a peer message an agent queues reaches
+// its recipient almost immediately, not up to a second later. The pump only
+// runs the (cheap, no-op when the queue is empty) queued-delivery check, so a
+// tight cadence is inexpensive.
+const deliverInterval = 150 * time.Millisecond
+
+func deliverTick() tea.Cmd {
+	return tea.Tick(deliverInterval, func(t time.Time) tea.Msg { return deliverTickMsg(t) })
 }
 
 // refresh polls the orchestrator and reloads view data.
@@ -622,6 +636,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.refresh()
 		return m, tick()
+	case deliverTickMsg:
+		// Fast path: deliver any queued peer messages right away instead of
+		// waiting for the next 1s supervision tick. Cheap when the queue is
+		// empty (a couple of indexed store reads and out).
+		m.o.DeliverQueued()
+		return m, deliverTick()
 	case askPlanMsg:
 		m.askBusy = false
 		if msg.err != nil {

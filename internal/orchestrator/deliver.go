@@ -101,6 +101,14 @@ func (o *Orchestrator) deliver(a *domain.Agent, m domain.Message) error {
 		}
 		return nil
 	case adapter.InputSendKeys:
+		// An agent's own `clishake send` runs in a sandbox with no terminal
+		// access, so it must not attempt (and half-complete) a pane delivery.
+		// It queues the message for the supervisor loop — the single process
+		// that owns the terminals — which delivers it deterministically. See
+		// messaging.ErrQueued and deliverQueued.
+		if os.Getenv("CLISHAKE_AGENT") != "" {
+			return messaging.ErrQueued
+		}
 		if a.Tmux.PaneID == "" {
 			return fmt.Errorf("agent %q has no pane", a.Name)
 		}

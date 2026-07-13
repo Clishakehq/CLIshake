@@ -60,61 +60,74 @@ func (o *Orchestrator) Poll() {
 		o.discoverSubagents(a)
 	}
 	if panesTrusted {
-		o.relayFailedDeliveries()
+		o.DeliverQueued()
 	}
 	o.runDueRestarts()
 }
 
-// relayKey / relayMax bound supervisor redelivery attempts per message.
-const (
-	relayKey    = "_relay_attempts"
-	relayMax    = 3
-	relayMaxAge = 10 * time.Minute
-)
+// relayMaxAge caps how long a queued message keeps being retried before it is
+// abandoned (the recipient is presumed unreachable).
+const relayMaxAge = 10 * time.Minute
 
-// relayFailedDeliveries re-attempts messages that an agent-side `clishake
-// send` could not push itself. Agents that run their shell in a sandbox
-// (e.g. Codex) can't reach the tmux server, so their direct messages to
-// another agent's pane fail — but the message is still recorded. The
-// supervisor runs with full tmux access, so it re-delivers on the sender's
-// behalf. Messages to the lead never need this (they are DB-backed and
-// always succeed).
-func (o *Orchestrator) relayFailedDeliveries() {
-	msgs, err := o.Store.ListMessagesByDelivery(domain.DeliveryFailed, 50)
-	if err != nil {
+// deliverQueued delivers every message waiting for the supervisor: the ones an
+// agent queued because its sandboxed `clishake send` has no terminal access
+// (DeliveryPending), plus any left over from a genuinely failed direct
+// delivery (DeliveryFailed). The supervisor is the single process that owns the
+// terminals, so all peer delivery flows through here — enqueue then deliver —
+// rather than each agent racing a pane write it cannot reliably complete.
+//
+// A queued message is retried on every tick until it is delivered, its
+// recipient leaves (a terminal status), or it ages out; it is never dropped
+// after a fixed number of tries. Messages to the lead never queue (they are
+// DB-backed and delivered on Send). Delivery is idempotent-safe to retry: a
+// failed attempt pastes nothing new, and the confirmed-submit path only reports
+// success once the composer accepts the message.
+func (o *Orchestrator) DeliverQueued() {
+	// Only the supervisor process owns the terminals. An agent's own process
+	// also runs Poll (via `clishake send`), but it cannot reach the panes, so
+	// it must not try — it would just fail and re-queue.
+	if os.Getenv("CLISHAKE_AGENT") != "" {
 		return
 	}
-	for _, m := range msgs {
+	var queued []*domain.Message
+	for _, state := range []domain.DeliveryState{domain.DeliveryPending, domain.DeliveryFailed} {
+		msgs, err := o.Store.ListMessagesByDelivery(state, 50)
+		if err != nil {
+			continue
+		}
+		queued = append(queued, msgs...)
+	}
+	// Nothing to deliver: return before doing any more work, so the fast
+	// delivery tick that calls this every ~150ms is almost free (two indexed
+	// reads) when the queue is empty. A genuinely unreachable terminal just
+	// makes the deliver() below fail and the message stay queued.
+	if len(queued) == 0 {
+		return
+	}
+	for _, m := range queued {
 		if m.Recipient == "" || m.Recipient == domain.LeadSender {
 			continue
 		}
 		if time.Since(m.CreatedAt) > relayMaxAge {
-			continue
-		}
-		attempts := 0
-		if m.Meta != nil {
-			attempts, _ = strconv.Atoi(m.Meta[relayKey])
-		}
-		if attempts >= relayMax {
-			continue
+			continue // presumed unreachable; stop retrying
 		}
 		a, err := o.Store.GetAgentByName(m.Recipient)
-		if err != nil || a == nil || !a.Status.IsLive() || a.Status == domain.StatusStarting {
+		if err != nil || a == nil {
 			continue
 		}
-		if m.Meta == nil {
-			m.Meta = map[string]string{}
+		if a.Status.IsTerminal() {
+			continue // recipient is gone; it can never receive this
+		}
+		if !a.Status.IsLive() || a.Status == domain.StatusStarting {
+			continue // not ready yet — leave queued and retry next tick
 		}
 		if err := o.deliver(a, *m); err != nil {
-			m.Meta[relayKey] = strconv.Itoa(attempts + 1)
-			_ = o.Store.SaveMessage(m)
-			continue
+			continue // still undeliverable; stays queued for the next tick
 		}
 		m.Delivery = domain.DeliveryDelivered
-		delete(m.Meta, relayKey)
 		_ = o.Store.SaveMessage(m)
 		o.emit(domain.EvMessageDelivered, m.Sender, m.ID, map[string]any{
-			"recipient": m.Recipient, "relayed": true,
+			"recipient": m.Recipient, "queued": true,
 		})
 	}
 }

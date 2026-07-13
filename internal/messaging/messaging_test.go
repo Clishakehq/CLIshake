@@ -222,11 +222,15 @@ func (f *fakeSink) Append(ev domain.Event) error {
 
 type fakeDeliverer struct {
 	fail  map[string]bool
+	queue map[string]bool
 	calls []string
 }
 
 func (f *fakeDeliverer) Deliver(a *domain.Agent, m domain.Message) error {
 	f.calls = append(f.calls, a.Name)
+	if f.queue[a.Name] {
+		return ErrQueued
+	}
 	if f.fail[a.Name] {
 		return errors.New("simulated delivery failure")
 	}
@@ -366,6 +370,38 @@ func TestRouterSendDeliveryFailure(t *testing.T) {
 	}
 	if !foundFailed {
 		t.Errorf("expected message.failed event")
+	}
+}
+
+func TestRouterSendQueued(t *testing.T) {
+	alice := agent("alice", "reviewer", "core", domain.StatusRunning)
+	agents := []*domain.Agent{alice}
+
+	store := &fakeStore{}
+	sink := &fakeSink{}
+	// A Deliverer that queues (as an agent's sandboxed send does) rather than
+	// delivering or failing.
+	deliverer := &fakeDeliverer{queue: map[string]bool{"alice": true}}
+
+	r := NewRouter("sess1", store, sink, deliverer)
+	msgs, err := r.Send(agents, "codex", "@alice", "peer hello", SendOpts{})
+	if err != nil {
+		t.Fatalf("Send should not error when a delivery is queued, got: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Delivery != domain.DeliveryPending {
+		t.Fatalf("Delivery = %q, want pending (queued)", msgs[0].Delivery)
+	}
+	if len(store.saved) != 1 || store.saved[0].Delivery != domain.DeliveryPending {
+		t.Errorf("persisted delivery state = %+v, want pending", store.saved)
+	}
+	// A queued message is neither delivered nor failed yet — only sent.
+	for _, ev := range sink.events {
+		if ev.Type == domain.EvMessageFailed {
+			t.Errorf("queued message must not emit message.failed")
+		}
+		if ev.Type == domain.EvMessageDelivered {
+			t.Errorf("queued message must not emit message.delivered until the supervisor delivers it")
+		}
 	}
 }
 

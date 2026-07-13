@@ -173,6 +173,15 @@ type Deliverer interface {
 // ErrNoRecipients is returned by Send when the selector matched no agents.
 var ErrNoRecipients = errors.New("selector matched no agents")
 
+// ErrQueued is returned by a Deliverer that deliberately did NOT deliver the
+// message and instead left it queued for another process to deliver. It is
+// not a failure: Send records the message as DeliveryPending (not Failed) and
+// does not emit a message.failed event. The supervisor loop — the single
+// process that owns the terminals — delivers queued messages. Agents run
+// their `clishake send` in a sandbox with no terminal access, so they queue
+// rather than attempt (and half-fail) a delivery they cannot complete.
+var ErrQueued = errors.New("delivery queued for the supervisor")
+
 // SendOpts carries the optional fields of an outgoing message.
 type SendOpts struct {
 	Type    domain.MessageType // default MsgChat
@@ -263,10 +272,14 @@ func (r *Router) Send(agents []*domain.Agent, sender, selector, body string, opt
 		}
 
 		derr := r.deliverer.Deliver(a, *m)
-		if derr != nil {
-			m.Delivery = domain.DeliveryFailed
-		} else {
+		switch {
+		case derr == nil:
 			m.Delivery = domain.DeliveryDelivered
+		case errors.Is(derr, ErrQueued):
+			// Deliberately not delivered here; the supervisor loop will.
+			m.Delivery = domain.DeliveryPending
+		default:
+			m.Delivery = domain.DeliveryFailed
 		}
 
 		if err := r.store.SaveMessage(m); err != nil {
@@ -278,12 +291,16 @@ func (r *Router) Send(agents []*domain.Agent, sender, selector, body string, opt
 			return nil, fmt.Errorf("messaging: append sent event: %w", err)
 		}
 
-		if derr != nil {
+		switch {
+		case errors.Is(derr, ErrQueued):
+			// Neither delivered nor failed: it waits in the queue. The
+			// supervisor emits message.delivered when it delivers it.
+		case derr != nil:
 			failPayload := map[string]any{"recipient": a.Name, "selector": selector, "error": derr.Error()}
 			if err := r.sink.Append(domain.NewEvent(r.sessionID, domain.EvMessageFailed, m.Sender, m.ID, failPayload)); err != nil {
 				return nil, fmt.Errorf("messaging: append failed event: %w", err)
 			}
-		} else {
+		default:
 			deliveredPayload := map[string]any{"recipient": a.Name, "selector": selector}
 			if err := r.sink.Append(domain.NewEvent(r.sessionID, domain.EvMessageDelivered, m.Sender, m.ID, deliveredPayload)); err != nil {
 				return nil, fmt.Errorf("messaging: append delivered event: %w", err)

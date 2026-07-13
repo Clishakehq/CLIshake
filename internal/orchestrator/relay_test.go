@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/clishakehq/clishake/internal/adapter"
 	adaptermock "github.com/clishakehq/clishake/internal/adapter/mock"
@@ -10,16 +11,22 @@ import (
 	"github.com/clishakehq/clishake/internal/messaging"
 )
 
-// flakyAdapter wraps the mock adapter but fails FormatInput until armed,
-// simulating an agent-side send that could not reach the recipient's pane.
+// flakyAdapter wraps the mock adapter. With mode InputFile it delivers via an
+// inbox file (no real tmux needed); FormatInput fails while armed, simulating a
+// delivery that could not reach the recipient. With mode InputSendKeys it lets
+// deliver() reach the "am I an agent process?" queue decision.
 type flakyAdapter struct {
 	*adaptermock.Adapter
+	mode adapter.InputMode
 	fail bool
 }
 
 func (f *flakyAdapter) Name() string { return "flaky" }
 func (f *flakyAdapter) InputMode() adapter.InputMode {
-	return adapter.InputFile // deliver via inbox file so no real tmux is needed
+	if f.mode != "" {
+		return f.mode
+	}
+	return adapter.InputFile
 }
 func (f *flakyAdapter) FormatInput(a *domain.Agent, m domain.Message) (string, error) {
 	if f.fail {
@@ -28,7 +35,23 @@ func (f *flakyAdapter) FormatInput(a *domain.Agent, m domain.Message) (string, e
 	return f.Adapter.FormatInput(a, m)
 }
 
-func TestRelayFailedDeliveries(t *testing.T) {
+func readyRecipient(t *testing.T, o *Orchestrator, name string) *domain.Agent {
+	t.Helper()
+	a, err := o.AddAgent(AgentSpec{Name: name, Adapter: "flaky"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Status = domain.StatusReady
+	_ = o.Store.SaveAgent(a)
+	return a
+}
+
+// deliverQueued must deliver messages left in either DeliveryFailed (a direct
+// attempt that failed) or DeliveryPending (queued by a sandboxed agent) — and
+// keep retrying rather than dropping them after a fixed number of attempts.
+func TestDeliverQueued_DeliversFailedAndPending(t *testing.T) {
+	t.Setenv("CLISHAKE_AGENT", "") // this test plays the supervisor process
+
 	dir := t.TempDir()
 	reg := adapter.NewRegistry()
 	fa := &flakyAdapter{Adapter: adaptermock.New(), fail: true}
@@ -38,15 +61,9 @@ func TestRelayFailedDeliveries(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(o.Close)
+	readyRecipient(t, o, "claude")
 
-	recipient, err := o.AddAgent(AgentSpec{Name: "claude", Adapter: "flaky"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recipient.Status = domain.StatusReady
-	_ = o.Store.SaveAgent(recipient)
-
-	// A send that fails delivery (as an agent-side send would from a sandbox).
+	// A direct send whose delivery fails, as a relayed legacy message would.
 	msgs, err := o.Send("codex", "@claude", "APPROVED", messaging.SendOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -55,37 +72,70 @@ func TestRelayFailedDeliveries(t *testing.T) {
 		t.Fatalf("expected one failed delivery, got %+v", msgs)
 	}
 
-	// Supervisor can reach the recipient now: relay should deliver it.
+	// Recipient reachable now: repeated ticks must eventually deliver it, and
+	// never drop it in the meantime.
 	fa.fail = false
-	o.relayFailedDeliveries()
-
-	got, _ := o.Store.ListMessagesByDelivery(domain.DeliveryDelivered, 0)
-	found := false
-	for _, m := range got {
-		if m.Recipient == "claude" && m.Body == "APPROVED" {
-			found = true
-		}
+	for i := 0; i < 5; i++ {
+		o.DeliverQueued()
 	}
-	if !found {
-		t.Fatal("relay did not re-deliver the failed message")
+	if !delivered(o, "claude", "APPROVED") {
+		t.Fatal("deliverQueued did not deliver the failed message")
 	}
 
-	// A permanently-failing message stops after relayMax attempts.
-	fa.fail = true
-	if _, err := o.Send("codex", "@claude", "never lands", messaging.SendOpts{}); err != nil {
+	// A message sitting in DeliveryPending (as a sandboxed agent would queue
+	// it) is delivered too.
+	pending := &domain.Message{
+		ID: domain.NewID("msg"), Sender: "codex", Recipient: "claude",
+		Type: domain.MsgChat, Body: "QUEUED", Delivery: domain.DeliveryPending,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := o.Store.SaveMessage(pending); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < relayMax+2; i++ {
-		o.relayFailedDeliveries()
+	o.DeliverQueued()
+	if !delivered(o, "claude", "QUEUED") {
+		t.Fatal("deliverQueued did not deliver the pending (queued) message")
 	}
-	stillFailed, _ := o.Store.ListMessagesByDelivery(domain.DeliveryFailed, 0)
-	var attempts string
-	for _, m := range stillFailed {
-		if m.Body == "never lands" {
-			attempts = m.Meta[relayKey]
+}
+
+// A send from an agent's own process (CLISHAKE_AGENT set) to a send-keys
+// recipient must be QUEUED, not attempted — the sandbox can't reach the pane.
+func TestDeliverQueued_AgentSendIsQueuedNotAttempted(t *testing.T) {
+	t.Setenv("CLISHAKE_AGENT", "codex") // this Send runs inside an agent
+
+	dir := t.TempDir()
+	reg := adapter.NewRegistry()
+	fa := &flakyAdapter{Adapter: adaptermock.New(), mode: adapter.InputSendKeys}
+	reg.Register(fa)
+	o, err := Open(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(o.Close)
+	readyRecipient(t, o, "claude")
+
+	msgs, err := o.Send("codex", "@claude", "PEER HELLO", messaging.SendOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Delivery != domain.DeliveryPending {
+		t.Fatalf("expected the agent send to be queued (pending), got %+v", msgs)
+	}
+
+	// The agent process must NOT deliver from its own Poll — it can't reach
+	// the terminals. deliverQueued is a no-op here.
+	o.DeliverQueued()
+	if delivered(o, "claude", "PEER HELLO") {
+		t.Fatal("agent process delivered a queued message it could not reach")
+	}
+}
+
+func delivered(o *Orchestrator, recipient, body string) bool {
+	got, _ := o.Store.ListMessagesByDelivery(domain.DeliveryDelivered, 0)
+	for _, m := range got {
+		if m.Recipient == recipient && m.Body == body {
+			return true
 		}
 	}
-	if attempts == "" {
-		t.Fatal("expected relay attempts to be recorded and capped")
-	}
+	return false
 }
