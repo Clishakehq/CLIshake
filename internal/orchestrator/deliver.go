@@ -117,10 +117,55 @@ func (o *Orchestrator) deliver(a *domain.Agent, m domain.Message) error {
 		}
 		delay := o.enterDelay(a) + time.Duration(min(len(payload), 4000))*time.Millisecond/2
 		time.Sleep(delay)
-		return o.Tmux.SendKeys(a.Tmux.PaneID, "Enter")
+		return o.submitComposer(a.Tmux.PaneID)
 	default:
 		return fmt.Errorf("adapter %q: unknown input mode", a.Adapter)
 	}
+}
+
+// submitConfirmTries bounds how many times submitComposer re-sends Enter
+// when the composer shows no reaction; submitConfirmWait is the pause
+// between an Enter and re-checking the pane.
+const (
+	submitConfirmTries = 4
+	submitConfirmWait  = 250 * time.Millisecond
+)
+
+// submitComposer presses Enter to submit the just-pasted text, then confirms
+// the composer actually accepted it — instead of firing one Enter and hoping.
+//
+// A bracketed paste is ingested asynchronously; a single Enter can arrive
+// before the TUI has finished reading the paste and is silently dropped,
+// leaving the message sitting unsubmitted in the composer (observed with the
+// Copilot and OpenCode CLIs). We snapshot the settled pane, send Enter, and if
+// nothing on screen changed — the reliable "that keystroke did nothing" signal
+// for an otherwise-idle composer — resend Enter and re-check, a few times.
+//
+// Re-sending Enter is safe where re-pasting is NOT: an empty composer ignores a
+// stray Enter, whereas a second paste would double the text. So this retries
+// the keypress only and never re-pastes; a genuinely failed delivery is left to
+// the supervisor, which redelivers the whole message from scratch.
+func (o *Orchestrator) submitComposer(paneID string) error {
+	before, _ := o.Tmux.CapturePane(paneID, 0)
+	if err := o.Tmux.SendKeys(paneID, "Enter"); err != nil {
+		return err
+	}
+	for i := 0; i < submitConfirmTries; i++ {
+		time.Sleep(submitConfirmWait)
+		after, err := o.Tmux.CapturePane(paneID, 0)
+		if err != nil {
+			return nil // can't verify — assume the Enter landed
+		}
+		if after != before {
+			return nil // the composer reacted: submitted (or now working)
+		}
+		// The pane is unchanged: the Enter was dropped (it raced the paste).
+		// Re-send it; a no-op on an empty composer, a submit on a full one.
+		if err := o.Tmux.SendKeys(paneID, "Enter"); err != nil {
+			return err
+		}
+	}
+	return nil // best effort; never re-paste (that would double the text)
 }
 
 // enterDelay is the pause between typed text and the Enter keypress for
