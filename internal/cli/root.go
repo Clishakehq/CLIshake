@@ -43,6 +43,10 @@ func buildRegistry() *adapter.Registry {
 		// auto/full permission profiles to it (override per agent with
 		// perm_auto / perm_full config).
 		PermissionFlags: map[string]string{"auto": "--allow-all-tools", "full": "--allow-all-tools --allow-all-paths"},
+		// Copilot shows the model as "… → gpt-5-mini" and session usage as
+		// "Session: 1.64 AIC used" in its status line.
+		StatusModelPattern: `→\s+(\S+)`,
+		StatusUsagePattern: `Session:\s+([\d.]+\s*AIC)`,
 	}))
 	reg.Register(adaptertui.New(adaptertui.Spec{
 		Name:    "antigravity",

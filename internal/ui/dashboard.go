@@ -1550,6 +1550,9 @@ func focusHeaderLine(a *domain.Agent) string {
 		statusDot(a.Status), agentStyle(a.Name).Render(a.Name),
 		dimStyle.Render(fmt.Sprintf("(%s%s)", a.Adapter, roleSuffix(a.Role))),
 		statusLabel(a.Status))
+	if mu := modelUsageLabel(a); mu != "" {
+		line += dimStyle.Render("  " + mu)
+	}
 	if a.Branch != "" {
 		line += dimStyle.Render("  ⎇ " + a.Branch)
 	}
@@ -1557,6 +1560,21 @@ func focusHeaderLine(a *domain.Agent) string {
 		line += dimStyle.Render("  ↳ " + a.Task)
 	}
 	return line
+}
+
+// modelUsageLabel renders an agent's live model and usage (e.g. "gpt-5-mini ·
+// 1.64 AIC"), read from its harness status line. Empty when nothing is known.
+func modelUsageLabel(a *domain.Agent) string {
+	model, usage := a.LiveModel(), a.Usage()
+	switch {
+	case model != "" && usage != "":
+		return "◍ " + model + " · " + usage
+	case model != "":
+		return "◍ " + model
+	case usage != "":
+		return "◍ " + usage
+	}
+	return ""
 }
 
 // focusStatusBlock renders sanitized recent status info for an agent with

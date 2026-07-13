@@ -127,3 +127,36 @@ func (*A) InterruptKeys() []string { return []string{"C-c"} }
 
 // BriefsAtLaunch: the briefing is the initial prompt preamble.
 func (*A) BriefsAtLaunch() bool { return true }
+
+// ReadStatus extracts the live model from Codex's status line. Codex renders a
+// composer footer "<model> · <workdir>" (and a startup box "model: <model>
+// /model to change"); the workdir on the right is an absolute path, which
+// distinguishes the model line from other bullet-separated lines. Codex does
+// not show a stable session-usage figure at rest, so Usage is left empty.
+func (*A) ReadStatus(screen string) adapter.LiveStatus {
+	var st adapter.LiveStatus
+	for _, line := range strings.Split(ansi.Strip(screen), "\n") {
+		line = strings.Trim(line, " │╭╮╰╯─\t") // drop box borders too
+		// Startup box: "model:     gpt-5.6-sol medium   /model to change".
+		if m, ok := strings.CutPrefix(line, "model:"); ok {
+			m = strings.TrimSpace(m)
+			if j := strings.Index(m, "/model"); j > 0 {
+				m = strings.TrimSpace(m[:j])
+			}
+			if m != "" {
+				st.Model = m
+			}
+			continue
+		}
+		// Composer footer: "<model> · /abs/work/dir".
+		if i := strings.Index(line, " · "); i > 0 {
+			right := strings.TrimSpace(line[i+len(" · "):])
+			if strings.HasPrefix(right, "/") || strings.HasPrefix(right, "~") {
+				if m := strings.TrimSpace(line[:i]); m != "" {
+					st.Model = m
+				}
+			}
+		}
+	}
+	return st
+}

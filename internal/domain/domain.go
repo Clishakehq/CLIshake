@@ -129,6 +129,28 @@ type Agent struct {
 	Health       string            `json:"health,omitempty"`    // freeform health note
 }
 
+// Config keys clishake maintains on an Agent (underscore-prefixed keys are
+// clishake-internal, not adapter config). ConfigModel is the launch-time model
+// the user chose; the others are read live from the harness status line.
+const (
+	ConfigModel     = "model"
+	ConfigLiveModel = "_live_model"
+	ConfigUsage     = "_usage"
+)
+
+// LiveModel returns the model the agent is running: the live model read from
+// its status line when known, otherwise the launch-time model the user chose.
+func (a *Agent) LiveModel() string {
+	if m := a.Config[ConfigLiveModel]; m != "" {
+		return m
+	}
+	return a.Config[ConfigModel]
+}
+
+// Usage returns the short usage/context note last read from the agent's status
+// line (empty when the harness doesn't report one).
+func (a *Agent) Usage() string { return a.Config[ConfigUsage] }
+
 // ---------------------------------------------------------------------------
 // Adapter capabilities
 // ---------------------------------------------------------------------------

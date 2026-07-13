@@ -141,6 +141,24 @@ type SubagentDiscoverer interface {
 	DiscoverSubagents(a *domain.Agent) []SubagentInfo
 }
 
+// LiveStatus is what an adapter can read from its harness's on-screen status
+// line: the model currently in use and a short usage/context note. Either
+// field may be empty, meaning "the harness doesn't show it (or not reliably),
+// so don't claim to know it."
+type LiveStatus struct {
+	Model string // e.g. "gpt-5-mini", "Fable 5"
+	Usage string // short, human-facing, e.g. "1.64 AIC", "12% ctx"
+}
+
+// StatusReporter is an optional adapter interface. Given a captured pane
+// screen (ANSI intact), it extracts the harness's live model and usage from
+// its status line so clishake can surface them read-only. Adapters return
+// empty fields rather than guess — consistent with never inventing structured
+// facts from unstructured output.
+type StatusReporter interface {
+	ReadStatus(screen string) LiveStatus
+}
+
 // LaunchBriefer is an optional interface: adapters that inject the session
 // briefing at launch time (system prompt, prompt preamble, or a briefing-
 // native protocol) return true, and the orchestrator leaves briefing to

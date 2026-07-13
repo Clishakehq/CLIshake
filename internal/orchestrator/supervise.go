@@ -56,6 +56,7 @@ func (o *Orchestrator) Poll() {
 			// First deliveries (briefing, task) are usually deferred past
 			// the readiness moment by the settle gate; retry each tick.
 			o.deliverPending(a)
+			o.readLiveStatus(a)
 		}
 		o.discoverSubagents(a)
 	}
@@ -134,6 +135,58 @@ func (o *Orchestrator) DeliverQueued() {
 
 // discoverEvery throttles per-agent sub-agent discovery scans.
 const discoverEvery = 5 * time.Second
+
+// statusEvery throttles per-agent live-status (model/usage) reads: the model
+// rarely changes and usage drifts slowly, so a pane capture every few seconds
+// is plenty and keeps the cost off the hot path.
+const statusEvery = 3 * time.Second
+
+// readLiveStatus captures a live agent's screen and, if its adapter can read a
+// status line, records the model and usage it reports. This is how clishake
+// surfaces each harness's live model/usage without typing "/usage" into the
+// agent (which would disrupt it). Throttled by statusEvery; the agent is
+// persisted only when a value actually changes.
+func (o *Orchestrator) readLiveStatus(a *domain.Agent) {
+	if !a.Status.IsLive() || a.Status == domain.StatusStarting || a.Tmux.PaneID == "" {
+		return
+	}
+	ad, ok := o.Registry.Get(a.Adapter)
+	if !ok {
+		return
+	}
+	sr, ok := ad.(adapter.StatusReporter)
+	if !ok {
+		return
+	}
+	o.mu.Lock()
+	if last, ok := o.statusAt[a.ID]; ok && time.Since(last) < statusEvery {
+		o.mu.Unlock()
+		return
+	}
+	o.statusAt[a.ID] = time.Now()
+	o.mu.Unlock()
+
+	screen, err := o.Tmux.CapturePane(a.Tmux.PaneID, 0)
+	if err != nil {
+		return
+	}
+	st := sr.ReadStatus(screen)
+	if a.Config == nil {
+		a.Config = map[string]string{}
+	}
+	changed := false
+	if st.Model != "" && a.Config[domain.ConfigLiveModel] != st.Model {
+		a.Config[domain.ConfigLiveModel] = st.Model
+		changed = true
+	}
+	if st.Usage != "" && a.Config[domain.ConfigUsage] != st.Usage {
+		a.Config[domain.ConfigUsage] = st.Usage
+		changed = true
+	}
+	if changed {
+		_ = o.Store.SaveAgent(a)
+	}
+}
 
 // discoverSubagents polls adapters that expose durable sub-agent/team
 // artifacts (adapter.SubagentDiscoverer): new members are registered as

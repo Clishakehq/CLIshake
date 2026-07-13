@@ -42,6 +42,7 @@ type Orchestrator struct {
 	restarts   map[string]time.Time   // agent ID -> not-before time for scheduled restart
 	history    map[string][]time.Time // agent ID -> recent failure times (crash-loop window)
 	discovered map[string]time.Time   // agent ID -> last sub-agent discovery scan
+	statusAt   map[string]time.Time   // agent ID -> last live-status (model/usage) read
 }
 
 // ClishakeDir returns the .clishake directory for a project.
@@ -115,6 +116,7 @@ func Open(projectDir string, reg *adapter.Registry) (*Orchestrator, error) {
 		restarts:   map[string]time.Time{},
 		history:    map[string][]time.Time{},
 		discovered: map[string]time.Time{},
+		statusAt:   map[string]time.Time{},
 	}
 	sess, err := st.GetSession()
 	if err != nil {

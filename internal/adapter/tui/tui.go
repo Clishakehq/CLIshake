@@ -15,6 +15,7 @@ package tui
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/clishakehq/clishake/internal/adapter"
@@ -49,13 +50,23 @@ type Spec struct {
 	// flags we don't know leave this empty (the profile is then a no-op —
 	// honest, and set-able via config).
 	PermissionFlags map[string]string
+	// StatusModelPattern and StatusUsagePattern are regexps with one capture
+	// group that read the live model and usage from the harness status line
+	// (e.g. copilot's "→ gpt-5-mini" and "Session: 1.64 AIC used"). Empty
+	// disables that field — the adapter then reports nothing rather than guess.
+	StatusModelPattern string
+	StatusUsagePattern string
 }
 
 // DefaultPromptGlyphs cover the composer prompts of common TUI agents.
 var DefaultPromptGlyphs = []string{"❯", "›", ">", "┃"}
 
 // A is a generic TUI harness adapter.
-type A struct{ spec Spec }
+type A struct {
+	spec    Spec
+	modelRe *regexp.Regexp
+	usageRe *regexp.Regexp
+}
 
 // New builds an adapter from a spec.
 func New(spec Spec) *A {
@@ -71,7 +82,16 @@ func New(spec Spec) *A {
 	if spec.ModelFlag == "" {
 		spec.ModelFlag = "--model" // the common case; per-agent "model_flag" config overrides
 	}
-	return &A{spec: spec}
+	a := &A{spec: spec}
+	// Invalid patterns are ignored (status parsing then reports nothing for
+	// that field) rather than failing adapter construction.
+	if spec.StatusModelPattern != "" {
+		a.modelRe, _ = regexp.Compile(spec.StatusModelPattern)
+	}
+	if spec.StatusUsagePattern != "" {
+		a.usageRe, _ = regexp.Compile(spec.StatusUsagePattern)
+	}
+	return a
 }
 
 func (a *A) Name() string { return a.spec.Name }
@@ -227,3 +247,33 @@ func (a *A) InterruptKeys() []string { return a.spec.InterruptKeys }
 // system-prompt or launch-prompt flag, so the orchestrator must deliver
 // the session briefing as the first message after readiness.
 func (a *A) BriefsAtLaunch() bool { return false }
+
+// ReadStatus reads the live model and usage from the harness status line using
+// the spec's configured patterns (capture group 1). A harness with no patterns
+// reports nothing rather than guess. Copilot, for example, shows the model as
+// "→ gpt-5-mini" and usage as "Session: 1.64 AIC used".
+// lastCapture returns the first submatch of re's LAST match in s (empty when re
+// is nil or no match). We take the last match because status lines put the live
+// value to the right of unrelated markers — e.g. copilot's "… → next tab … →
+// gpt-5-mini", where the model is the rightmost "→".
+func lastCapture(re *regexp.Regexp, s string) string {
+	if re == nil {
+		return ""
+	}
+	all := re.FindAllStringSubmatch(s, -1)
+	if len(all) == 0 || len(all[len(all)-1]) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(all[len(all)-1][1])
+}
+
+func (a *A) ReadStatus(screen string) adapter.LiveStatus {
+	if a.modelRe == nil && a.usageRe == nil {
+		return adapter.LiveStatus{}
+	}
+	plain := ansi.Strip(screen)
+	return adapter.LiveStatus{
+		Model: lastCapture(a.modelRe, plain),
+		Usage: lastCapture(a.usageRe, plain),
+	}
+}
