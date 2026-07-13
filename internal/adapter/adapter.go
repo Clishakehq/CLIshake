@@ -184,6 +184,16 @@ type LiveStatus struct {
 	Usage string // short, human-facing, e.g. "1.64 AIC", "12% ctx"
 }
 
+// SkillHost is an optional adapter interface for harnesses with a native
+// skills directory (relative to the agent's working directory). clishake
+// installs the shared team skills there so the harness auto-loads them; e.g.
+// Claude Code returns ".claude/skills". Harnesses without a native skills
+// system don't implement it — their agents still learn about the shared skills
+// through the launch briefing, which points every agent at .clishake/skills.
+type SkillHost interface {
+	NativeSkillsDir() string
+}
+
 // StatusReporter is an optional adapter interface. Given a captured pane
 // screen (ANSI intact), it extracts the harness's live model and usage from
 // its status line so clishake can surface them read-only. Adapters return

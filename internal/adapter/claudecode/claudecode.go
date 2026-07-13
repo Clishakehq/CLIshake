@@ -192,3 +192,8 @@ func (*A) InterruptKeys() []string { return []string{"Escape"} }
 
 // BriefsAtLaunch: the briefing rides in via --append-system-prompt.
 func (*A) BriefsAtLaunch() bool { return true }
+
+// NativeSkillsDir is Claude Code's project skills directory (relative to the
+// agent's working directory); clishake installs the shared team skills here so
+// Claude's Skill system auto-discovers them.
+func (*A) NativeSkillsDir() string { return ".claude/skills" }

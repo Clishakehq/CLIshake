@@ -91,6 +91,17 @@ func (o *Orchestrator) briefing(a *domain.Agent) string {
 	fmt.Fprintf(&b, "    %s/tasks.md   — the shared task board\n", ctxDir)
 	fmt.Fprintf(&b, "    %s/notes.md   — shared notes & decisions (append via the note command)\n", ctxDir)
 
+	if skills := o.ListSkills(); len(skills) > 0 {
+		fmt.Fprintf(&b, "- SHARED TEAM SKILLS live in %s and apply to every agent regardless of harness. Consult them for how this team does things:\n", o.SkillsDir())
+		for _, s := range skills {
+			if s.Description != "" {
+				fmt.Fprintf(&b, "    %s — %s\n", s.Name, s.Description)
+			} else {
+				fmt.Fprintf(&b, "    %s\n", s.Name)
+			}
+		}
+	}
+
 	if a.Role == CoordinatorRole {
 		b.WriteString("\nYOU ARE THE SESSION COORDINATOR\n")
 		b.WriteString("- Your job is coordination, not implementation: do not edit project files or write code unless the lead explicitly asks.\n")

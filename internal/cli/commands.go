@@ -577,6 +577,59 @@ func newCleanCmd() *cobra.Command {
 	}
 }
 
+func newSkillsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "skills [sync]",
+		Short: "List shared team skills, or sync them into running agents' harnesses",
+		Long: `Shared skills live in .clishake/skills/ and are given to every agent,
+regardless of harness. With no argument this lists them; "sync" re-installs
+them into each live agent's native skills directory (e.g. Claude Code's
+.claude/skills). Every agent is also pointed at .clishake/skills in its
+launch briefing, so harnesses without a native skills system still use them.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o, err := open()
+			if err != nil {
+				return err
+			}
+			defer o.Close()
+
+			if len(args) == 1 && args[0] == "sync" {
+				agents, err := o.Store.ListAgents()
+				if err != nil {
+					return err
+				}
+				total := 0
+				for _, a := range agents {
+					if a.Status.IsLive() {
+						if n := o.SyncSkills(a); n > 0 {
+							fmt.Printf("→ %-12s %d skill(s)\n", a.Name, n)
+							total += n
+						}
+					}
+				}
+				fmt.Printf("synced %d skill installation(s)\n", total)
+				return nil
+			}
+
+			skills := o.ListSkills()
+			if len(skills) == 0 {
+				fmt.Printf("no shared skills yet — add one under %s (see its README.md)\n", o.SkillsDir())
+				return nil
+			}
+			for _, s := range skills {
+				if s.Description != "" {
+					fmt.Printf("• %-20s %s\n", s.Name, s.Description)
+				} else {
+					fmt.Printf("• %s\n", s.Name)
+				}
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
 func newLoopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "loop <task...> | stop | status",

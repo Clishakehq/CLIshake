@@ -63,10 +63,15 @@ func InitProject(projectDir string) (bool, error) {
 	if err := config.Save(projectDir, cfg); err != nil {
 		return false, err
 	}
-	for _, sub := range []string{"agents", "adapters", "logs", "worktrees", "context"} {
+	for _, sub := range []string{"agents", "adapters", "logs", "worktrees", "context", "skills"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			return false, err
 		}
+	}
+	// Explain the shared-skills directory so it's discoverable and committable.
+	skillsReadme := filepath.Join(dir, "skills", "README.md")
+	if _, err := os.Stat(skillsReadme); os.IsNotExist(err) {
+		_ = os.WriteFile(skillsReadme, []byte(skillsReadmeText), 0o644)
 	}
 	// Keep runtime state out of the project's git history while leaving
 	// config.toml (and adapter definitions) committable for the team.

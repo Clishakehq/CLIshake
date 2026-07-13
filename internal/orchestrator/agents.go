@@ -212,6 +212,10 @@ func (o *Orchestrator) StartAgent(name string) (*domain.Agent, error) {
 	}
 	a.WorkDir, a.Branch = workDir, branch
 
+	// Install the shared team skills into this harness's native skills dir (if
+	// it has one) before launch, so they're present when the process starts.
+	o.SyncSkills(a)
+
 	// Runtime dir (inbox + output log).
 	dir := o.AgentDir(a)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
