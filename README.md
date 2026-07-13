@@ -63,6 +63,17 @@ workspaces — on top of tmux-managed agent terminals.
 - **Disconnect-proof** — agents live in tmux, not in the dashboard.
   Close your laptop; reattach later; CLIshake reconciles and tells you
   what happened while you were away.
+- **Per-agent model & permissions** — launch each agent on the model you
+  want (`--model`) with a permission profile that stops mid-session
+  re-prompts (`--permissions`); the folder-trust dialog is auto-answered.
+- **Live model & usage** — see which model each agent is actually running
+  and how much it has used, read from its status line; `/usage` rolls it
+  up for the whole team.
+- **Team-level commands** — `/loop` keeps the whole team working toward a
+  shared goal until you stop it; `/goal`, `/usage`, `/clear`, and pass any
+  harness slash command straight through with `@agent /command`.
+- **Shared skills** — one `.clishake/skills/` set every agent gets,
+  whatever its harness (installed natively where the harness supports it).
 - **Natural language optional** — `clishake ask "spin up a reviewer
   team"` turns intent into a reviewed, whitelisted command plan.
 
@@ -173,10 +184,16 @@ With real harnesses installed:
 
 ```bash
 clishake agent add claude --adapter claude-code --role backend \
+  --model opus --permissions auto \
   --task "Implement the API changes"
 clishake agent add codex --adapter codex --role reviewer \
   --task "Review backend changes"
 ```
+
+`--model` picks the harness model (e.g. `opus`, `sonnet`, `claude-fable-5`,
+a Codex/Copilot model name); `--permissions` (`default`/`auto`/`full`/`plan`)
+maps to each harness's own flags so agents stop re-prompting for approval. See
+[docs/workspace-and-permissions.md](docs/workspace-and-permissions.md).
 
 Every real agent is launched with a **session briefing** (identity, live
 roster, how to message teammates via the CLIshake CLI) and with
@@ -242,8 +259,13 @@ dashboard: `a` accepts the highlighted option, `A` picks the second
 | `@builder <text>` | message one agent |
 | `@role:reviewer <text>` | message all agents with a role |
 | `@team:core <text>` / `@all <text>` | team / broadcast |
-| `/ask <intent>` | natural language → plan overlay, `y` to run |
+| `@agent /command` | pass a harness slash command through (e.g. `@claude /compact`) |
+| `/ask <intent>` | natural language → plan overlay, `y` to run (multi-line: `alt+enter`) |
 | `/add <name> [adapter] [role]` | spawn an agent |
+| `/loop <task>` · `/loop stop` | team loop: keep everyone working toward a goal |
+| `/goal <text>` | set & broadcast a shared team goal |
+| `/usage` | roll up every agent's live model and usage |
+| `/clear` | hide prior dashboard activity |
 | `/stop`, `/restart`, `/remove <name>` | lifecycle control |
 | `/task <title>` · `/assign <task-id> <agent>` | task board |
 | `/grant <id>` · `/deny <id>` | approval decisions |
@@ -263,7 +285,7 @@ reconciles.
 | `clishake init` | initialize `.clishake/` and open the dashboard (`--no-open` to skip) |
 | `clishake status` | session summary + reconcile report |
 | `clishake agents` | agent tree (parents and sub-agents) |
-| `clishake agent add <name> --adapter A --role R --task T [--no-start]` | register (+start) an agent |
+| `clishake agent add <name> --adapter A --role R --task T [--model M] [--permissions P] [--no-start]` | register (+start) an agent |
 | `clishake agent start\|stop\|restart\|remove <name>` | lifecycle |
 | `clishake agent set <name> --role R --team T` | re-cluster a live agent |
 | `clishake agent focus <name>` | jump to the agent's tmux window |
@@ -272,6 +294,8 @@ reconciles.
 | `clishake task create --title T [--assign A] [--priority N] [--depends-on IDs]` | create task |
 | `clishake task assign <task-id> <agent>` / `task update <id> --status S` | task board |
 | `clishake tasks` / `clishake messages [--with A]` | boards & history |
+| `clishake loop <task> \| stop \| status` | team loop toward a shared goal |
+| `clishake skills [sync]` | list shared team skills / re-install into agents |
 | `clishake logs <name> [-n N] [--raw]` | rendered agent terminal (live) / sanitized log |
 | `clishake note <text>` | append an attributed note to the shared context |
 | `clishake events [-n N] [-f] [--json]` | shared audit log |

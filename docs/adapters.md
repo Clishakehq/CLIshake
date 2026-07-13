@@ -35,6 +35,30 @@ fallback is send-keys typing; there is no output fallback — an adapter that
 cannot parse output simply yields no structured events, and supervision falls
 back to process-level signals only.
 
+### Optional interfaces
+
+An adapter may implement extra interfaces to opt into richer behavior. The
+orchestrator type-asserts for each; absent, it degrades gracefully.
+
+| Interface | Purpose |
+|---|---|
+| `LaunchBriefer` | briefs at launch (system prompt / preamble) instead of receiving the briefing as the first routed message |
+| `SubagentDiscoverer` | exposes sub-agents/teams via durable artifacts (Claude Code's `~/.claude/teams` rosters) |
+| `StatusReporter` | `ReadStatus(screen)` → live **model + usage** parsed from the harness status line; empty fields when nothing is reliably shown (never guess). The supervisor reads this every ~3s from the captured pane and surfaces it read-only — no `/usage` keystrokes into the agent |
+| `SkillHost` | `NativeSkillsDir()` → where the harness auto-loads skills (Claude Code: `.claude/skills`); clishake installs the shared team skills there (see [Shared skills](#shared-skills)) |
+
+### Model, permissions, and slash passthrough
+
+- **`BuildLaunch`** maps two cross-harness agent settings onto each harness's
+  own flags: `model` (`--model`, or the harness's equivalent) and
+  `permissions` (`default`/`auto`/`full`/`plan`). See
+  [workspace-and-permissions.md](workspace-and-permissions.md) for the mapping.
+- **`FormatInput`** (via `adapter.FormatRouted`) passes a slash command from
+  the **lead** through verbatim — `@claude /compact`, `/model gpt-5` — so the
+  recipient's harness runs it, while ordinary messages keep the
+  `[clishake message from <sender>]` attribution prefix. Only the lead may pass
+  a command through; a path like `/etc/hosts` is not treated as one.
+
 ## Built-in adapters
 
 | | mock | claude-code | codex | opencode / copilot / antigravity |
@@ -63,14 +87,20 @@ vary by version (and none exposes a verified system-prompt flag):
   `[adapters.opencode.options] ready_marker = "Ask anything"`. Until
   readiness fires the agent stays `starting` (flagged in `status` with an
   attach hint) and deliveries fail honestly instead of being swallowed.
-- **Delivery is a bracketed paste, then Enter after a scaled pause.**
+- **Delivery is a bracketed paste, then a confirmed Enter.**
   Per-key injection races some frameworks' input handling and silently
   drops text (observed live with Antigravity), and the Enter pause grows
   with payload size (OpenCode kept a ~1800-char briefing unsubmitted at
-  400 ms). After readiness, the first delivery also waits out a **settle
-  period** (`settle_ms`, default 2500) — composers are often drawn before
-  their input handlers attach, and text typed into that gap disappears
-  (observed live with Copilot CLI and Antigravity).
+  400 ms). A bracketed paste is also ingested asynchronously, so a single
+  Enter can be dropped and the message left sitting in the composer
+  (reported with Copilot). Delivery therefore **confirms the submit**:
+  it snapshots the settled pane, sends Enter, and re-sends Enter if nothing
+  on screen changed — retrying the keypress only, never re-pasting (an empty
+  composer ignores a stray Enter; a second paste would double the text).
+  After readiness, the first delivery also waits out a **settle period**
+  (`settle_ms`, default 2500) — composers are often drawn before their input
+  handlers attach, and text typed into that gap disappears (observed live
+  with Copilot CLI and Antigravity).
 - **The session briefing arrives as the first routed message** once the
   agent is ready and settled (audited, attributed to `clishake`), followed
   by the assigned task. Restarted agents are re-briefed automatically — a
@@ -79,14 +109,15 @@ vary by version (and none exposes a verified system-prompt flag):
   all overridable per project under `[adapters.<name>]`, so a renamed
   binary or changed UI is a config edit, not a code change. A missing
   binary shows as "harness not installed" in `clishake doctor`.
-- Harness notes (validated live 2026-07-10): **Antigravity** installs as
-  `agy` (the adapter's default); it read the context files and replied via
+- Harness notes (validated live): **Antigravity** installs as `agy` (the
+  adapter's default); it read the context files and replied via
   `clishake send` after its per-file/command approvals. **Copilot CLI**
-  asks folder-trust and command approvals on first run — answer once from
-  the dashboard (a/A/d keys; pick the "remember/allow list" options) and
-  the loop runs hands-free afterwards. **OpenCode** needs a configured AI
-  provider (`/connect` inside its TUI) before it can respond; delivery
-  works regardless.
+  asks folder-trust and command approvals on first run — the folder-trust
+  dialog is now **auto-answered** by the supervisor (opt out with
+  `auto_trust=false`), and a `--permissions auto` profile maps to
+  `--allow-all-tools` so tool approvals don't recur either. **OpenCode**
+  needs a configured AI provider (`/connect` inside its TUI) before it can
+  respond; delivery works regardless.
 - Caveat: send-keys harnesses must be full-screen TUIs (raw-mode input).
   Plain line-based REPLs cap input lines at the tty's canonical limit
   (~1024 chars) and will drop the briefing.
@@ -106,12 +137,15 @@ harnesses first-class session members:
    environment) makes those commands target the session project from any
    directory, and `CLISHAKE_AGENT` attributes them to the agent —
    advisory attribution for auditability, not a security boundary.
-3. **Typed delivery that actually lands.** Messages are typed literally,
-   then submitted with Enter after a delay (`enter_delay_ms`, default
-   400 ms) — interactive TUIs drop an Enter that arrives in the same burst
-   as pasted text. Delivery to an agent whose composer has not rendered yet
-   (status `starting`) fails honestly instead of being silently swallowed;
-   resend once it is ready.
+3. **Typed delivery that actually lands.** Messages are pasted, then
+   submitted with a **confirmed** Enter after a delay (`enter_delay_ms`,
+   default 400 ms) — interactive TUIs drop an Enter that arrives in the same
+   burst as pasted text, so delivery re-sends Enter until the composer reacts
+   (keypress only, never re-pasting). Delivery to an agent whose composer has
+   not rendered yet (status `starting`) fails honestly instead of being
+   silently swallowed; resend once it is ready. Peer messages an agent sends
+   from a sandbox are queued and delivered by the supervisor — see
+   [architecture.md](architecture.md).
 
 Supervision beyond that is process-level (alive/exited/restart), which is
 exactly what CLIshake can truthfully provide today — with one structured
@@ -125,10 +159,30 @@ remains future work, not a claimed feature.
 
 Per-agent adapter settings go in the agent's `config` map or the
 project-level `[adapters.<name>]` section: `command` (executable override),
-`args` (extra CLI args), `enter_delay_ms`, `permission_mode` (claude-code
-only — pair it with harness-side tool allowlists, e.g.
-`args = ["--allowedTools", "Bash"]`, so agents can run CLIshake commands
-without a permission prompt).
+`args` (extra CLI args), `enter_delay_ms`, `settle_ms`, `ready_marker`,
+`model` (the harness model, also `--model` on `agent add`), `permissions`
+(the cross-harness profile, also `--permissions`), `auto_trust` (`false`
+to stop the supervisor auto-answering the folder-trust dialog), and
+`permission_mode` (claude-code only — a low-level override; pair it with
+harness-side tool allowlists, e.g. `args = ["--allowedTools", "Bash"]`, so
+agents can run CLIshake commands without a permission prompt). The generic
+TUI adapter also takes `model_flag`, `perm_<profile>`, and
+`status_model_pattern` / `status_usage_pattern` (regexps that read the live
+model/usage from the status line).
+
+## Shared skills
+
+Shared team skills live in `.clishake/skills/` — one set every agent gets,
+whatever its harness. Each skill is a subdirectory with a `SKILL.md` (the
+Agent Skills format: YAML frontmatter `name`/`description`, then
+instructions) or a flat `<name>.md`. clishake installs them into a harness's
+native skills directory when it implements `SkillHost` (Claude Code's
+`.claude/skills`), as symlinks to the canonical dir that never clobber a
+skill the user placed there themselves; and it points every agent at
+`.clishake/skills` in the launch briefing, so harnesses without a native
+skills system still use them. Manage with `clishake skills` (list) and
+`clishake skills sync`; the directory is committable, so a team shares skills
+through git.
 
 ## The wire protocol (`internal/wire`)
 

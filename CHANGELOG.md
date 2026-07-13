@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.2.0 — 2026-07-12
+
+First round of real first-user feedback, all validated against real Claude
+Code, OpenAI Codex, and GitHub Copilot CLI sessions (gated integration tests,
+`CLISHAKE_*_ITEST=1`).
+
+### Model & permissions at launch
+- `--model` picks the harness model when adding an agent
+  (`clishake agent add … --model <name>`, or the `model` config), e.g. start
+  Claude on Fable 5 instead of Opus. Wired through every adapter's launch flags.
+- `--permissions <default|auto|full|plan>` sets a cross-harness permission
+  profile at launch, mapped to each harness's own flags (Claude Code
+  `--permission-mode`/`--dangerously-skip-permissions`, Codex
+  `--sandbox`/`--ask-for-approval`, Copilot `--allow-all-tools`), so agents
+  stop re-prompting for approval mid-session. `auto` is recommended; `full`
+  intentionally does **not** auto-acknowledge a harness's own bypass-mode
+  warning.
+- The one-time-per-directory **folder-trust dialog is auto-answered** by the
+  supervisor. Every agent gets its own worktree, so this otherwise recurred
+  once per agent; opt out with `auto_trust=false`. (Bypass-permission danger
+  prompts are deliberately left for a human.)
+
+### Reliable, near-instant messaging
+- **Confirmed composer submit.** Delivery used to paste the message and fire a
+  single Enter; a bracketed paste is ingested asynchronously, so that Enter
+  could be dropped and the message sat unsubmitted in the composer (reported
+  with Copilot, seen with OpenCode). Delivery now confirms the composer
+  reacted and re-sends Enter if not — retrying the keypress only, never
+  re-pasting.
+- **Deterministic peer delivery.** A sandboxed agent (e.g. Codex) can't reach
+  the tmux socket to type into a peer's terminal, so its sends half-failed and
+  a relay retried them — and dropped after a few tries. Now an agent's
+  `clishake send` only records the message (to the shared SQLite state DB,
+  which is inside its writable workspace); the supervisor — the one process
+  that owns the terminals — delivers every queued message, retrying until it
+  lands rather than dropping it. No more Codex→Claude messages going missing.
+- A 150ms delivery pump makes queued peer messages arrive in ~1–2s instead of
+  waiting for the 1s supervision tick.
+
+### Visibility
+- **Live model & usage per agent.** clishake reads each harness's status line
+  (which the supervisor already has on screen) and shows the model it's
+  actually running and its usage — e.g. `◍ claude-haiku-4.5 · 0 AIC` — without
+  typing `/usage` into the agent. `/usage` in the dashboard rolls this up for
+  the whole team. Adapters report nothing rather than guess.
+- **Multi-line composer.** The dashboard message line is now a growing textarea
+  (1–6 rows) that wraps long `/ask` text and multi-line messages instead of
+  scrolling off a single line. `alt`/`shift`/`ctrl+enter` inserts a newline;
+  plain Enter still sends.
+
+### Team-level commands
+- Lead **slash commands pass through** to a harness verbatim (`@claude
+  /compact`, `/model gpt-5`), so you can drive any harness command from
+  clishake. Only the lead may pass one through; paths like `/etc/hosts` aren't
+  treated as commands.
+- **`/loop <task>`** — the clishake-level analogue of a harness `/loop`: it
+  broadcasts a shared goal and the supervisor re-engages any agent that goes
+  idle (idle > 25s, rate-limited) so the team keeps working until `/loop stop`.
+  State lives in `.clishake/loop.json`, so an agent can end it from its sandbox
+  (`clishake loop stop`; also `clishake loop <task>|status`).
+- **`/goal <text>`** sets and broadcasts a shared team goal; **`/usage`** rolls
+  up every agent's live model + usage; **`/clear`** hides prior dashboard
+  activity (a single agent's context clears with `@agent /clear`).
+
+### Shared skills across harnesses
+- One place — `.clishake/skills/` — to maintain team capabilities every agent
+  gets, whatever its harness. Each skill is a `SKILL.md` (Agent Skills format)
+  or a flat `<name>.md`. clishake installs them into a harness's native skills
+  directory when it has one (Claude Code's `.claude/skills`, as symlinks that
+  never clobber a user's own skills) and points every agent at the directory in
+  its launch briefing. Manage with `clishake skills` / `clishake skills sync`.
+  The directory is committable, so a team shares skills through git.
+
 ## v0.1.0 — 2026-07-10
 
 First release. CLIshake — the terminal coordination layer for

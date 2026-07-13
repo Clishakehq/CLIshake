@@ -61,7 +61,10 @@ command = "claude"
 # `clishake send` without a permission prompt.
 args = ["--allowedTools", "Bash"]
 [adapters.claude-code.options]
-permission_mode = "acceptEdits"   # default | acceptEdits | plan | bypassPermissions
+# model = "claude-fable-5"        # launch model (also: agent add --model)
+# permissions = "auto"           # cross-harness profile: default|auto|full|plan
+# auto_trust = "true"            # "false" to answer the folder-trust dialog yourself
+permission_mode = "acceptEdits"   # low-level override: default | acceptEdits | plan | bypassPermissions
 enter_delay_ms = "400"            # pause between typed message and Enter
 
 [adapters.codex]
@@ -70,6 +73,13 @@ command = "codex"
 [adapters.codex.options]
 enter_delay_ms = "400"
 
+# Copilot (and the other generic TUI adapters) read the live model/usage from
+# the harness status line via these regexps; permissions map to its own flags.
+# [adapters.copilot.options]
+# permissions = "auto"                              # → --allow-all-tools
+# status_model_pattern = '→\\s+(\\S+)'
+# status_usage_pattern = 'Session:\\s+([\\d.]+\\s*AIC)'
+
 # Agent templates: predefine agents so `clishake agent add <name>` needs no
 # flags. (Secrets NEVER go here — this file is committed with your project.)
 [[agents]]
@@ -77,6 +87,8 @@ name = "builder"
 role = "backend"
 adapter = "mock"
 task = "Implement the API changes"
+# model = "opus"                 # pick the harness model at launch
+# permissions = "auto"           # stop mid-session approval re-prompts
 
 [[agents]]
 name = "reviewer"
