@@ -103,9 +103,9 @@ func codexPermArgs(profile string) []string {
 func (*A) InputMode() adapter.InputMode { return adapter.InputSendKeys }
 
 func (*A) FormatInput(a *domain.Agent, msg domain.Message) (string, error) {
-	// Sender prefix matches what the launch briefing tells the agent to
-	// expect for clishake-routed traffic.
-	return "[clishake message from " + msg.Sender + "] " + msg.Body, nil
+	// Sender prefix matches what the launch briefing tells the agent to expect;
+	// a slash command from the lead is passed through verbatim so Codex runs it.
+	return adapter.FormatRouted(msg.Sender, msg.Body), nil
 }
 
 func (*A) ParseOutput(a *domain.Agent, chunk string) []adapter.ParsedEvent { return nil }

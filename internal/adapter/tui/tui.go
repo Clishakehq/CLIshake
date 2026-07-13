@@ -171,7 +171,9 @@ func (a *A) BuildLaunch(ag *domain.Agent, projectDir string) (adapter.LaunchSpec
 func (a *A) InputMode() adapter.InputMode { return adapter.InputSendKeys }
 
 func (a *A) FormatInput(ag *domain.Agent, msg domain.Message) (string, error) {
-	return "[clishake message from " + msg.Sender + "] " + msg.Body, nil
+	// A slash command from the lead passes through verbatim so the harness runs
+	// it (/loop, /compact, ...); other messages keep the attribution prefix.
+	return adapter.FormatRouted(msg.Sender, msg.Body), nil
 }
 
 func (a *A) ParseOutput(ag *domain.Agent, chunk string) []adapter.ParsedEvent { return nil }

@@ -133,10 +133,10 @@ func claudePermArgs(profile string) []string {
 func (*A) InputMode() adapter.InputMode { return adapter.InputSendKeys }
 
 func (*A) FormatInput(a *domain.Agent, msg domain.Message) (string, error) {
-	// Typed into the interactive prompt. Every message carries the sender
-	// prefix the launch briefing tells the agent to expect, so routed
-	// traffic is distinguishable from ad-hoc typing in its terminal.
-	return fmt.Sprintf("[clishake message from %s] %s", msg.Sender, msg.Body), nil
+	// Typed into the interactive prompt. Routed messages carry the sender
+	// prefix the launch briefing tells the agent to expect; a slash command
+	// from the lead is passed through verbatim so Claude executes it.
+	return adapter.FormatRouted(msg.Sender, msg.Body), nil
 }
 
 // ParseOutput: no structured stream — we only surface nothing rather than

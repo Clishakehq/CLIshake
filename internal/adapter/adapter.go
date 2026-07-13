@@ -14,8 +14,42 @@
 package adapter
 
 import (
+	"strings"
+
 	"github.com/clishakehq/clishake/internal/domain"
 )
+
+// IsSlashCommand reports whether body is a harness slash command (e.g. "/loop",
+// "/model gpt-5", "/compact") as opposed to ordinary text or a filesystem path.
+// A command starts with "/" + a letter, and its first token contains no further
+// "/", which excludes paths like "/Users/foo/bar".
+func IsSlashCommand(body string) bool {
+	b := strings.TrimSpace(body)
+	if len(b) < 2 || b[0] != '/' {
+		return false
+	}
+	if c := b[1]; !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		return false
+	}
+	first := b
+	if i := strings.IndexAny(b, " \t"); i >= 0 {
+		first = b[:i]
+	}
+	return !strings.Contains(first[1:], "/")
+}
+
+// FormatRouted renders a routed message for send-keys delivery. A slash command
+// from the lead is passed through verbatim so the recipient's harness executes
+// it (/loop, /compact, /model, ...); every other message carries the
+// sender-attribution prefix the launch briefing tells agents to expect. Only
+// the lead may pass slash commands through, so a peer's message that happens to
+// start with "/" can never silently drive another agent's harness.
+func FormatRouted(sender, body string) string {
+	if sender == domain.LeadSender && IsSlashCommand(body) {
+		return strings.TrimSpace(body)
+	}
+	return "[clishake message from " + sender + "] " + body
+}
 
 // LaunchSpec describes how to start a harness process inside a terminal
 // pane. The orchestrator materializes it with tmux.
