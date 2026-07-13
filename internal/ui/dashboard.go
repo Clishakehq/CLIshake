@@ -92,22 +92,23 @@ const (
 const maxGridCells = 6
 
 type model struct {
-	o        *orchestrator.Orchestrator
-	agents   []*domain.Agent
-	events   []domain.Event
-	msgs     []*domain.Message
-	tasks    []*domain.Task
-	pending  int // pending approvals
-	input    textarea.Model
-	sel      int               // selected agent row
-	rows     []*domain.Agent   // flattened tree in display order
-	view     int               // current view: viewOverview | viewFocus | viewGrid
-	preview  string            // rendered terminal screen of the selected agent (overview/focus)
-	previews map[string]string // agent ID -> rendered terminal screen (grid)
-	width    int
-	height   int
-	feedback string
-	quitting bool
+	o         *orchestrator.Orchestrator
+	agents    []*domain.Agent
+	events    []domain.Event
+	msgs      []*domain.Message
+	tasks     []*domain.Task
+	pending   int       // pending approvals
+	clearedAt time.Time // /clear hides activity/messages older than this
+	input     textarea.Model
+	sel       int               // selected agent row
+	rows      []*domain.Agent   // flattened tree in display order
+	view      int               // current view: viewOverview | viewFocus | viewGrid
+	preview   string            // rendered terminal screen of the selected agent (overview/focus)
+	previews  map[string]string // agent ID -> rendered terminal screen (grid)
+	width     int
+	height    int
+	feedback  string
+	quitting  bool
 
 	// /ask state: a translation running in the background, and a proposed
 	// plan awaiting the lead's y/n decision.
@@ -384,6 +385,50 @@ func deliverTick() tea.Cmd {
 	return tea.Tick(deliverInterval, func(t time.Time) tea.Msg { return deliverTickMsg(t) })
 }
 
+func filterEventsAfter(evs []domain.Event, after time.Time) []domain.Event {
+	out := evs[:0:0]
+	for _, e := range evs {
+		if e.Timestamp.After(after) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func filterMsgsAfter(msgs []*domain.Message, after time.Time) []*domain.Message {
+	out := msgs[:0:0]
+	for _, mm := range msgs {
+		if mm.CreatedAt.After(after) {
+			out = append(out, mm)
+		}
+	}
+	return out
+}
+
+// usageSummary is a one-line roll-up of every live agent's model and usage,
+// read from their harness status lines (see readLiveStatus). It answers
+// "/usage" for the whole team at once.
+func (m model) usageSummary() string {
+	var parts []string
+	for _, a := range m.agents {
+		if !a.Status.IsLive() || a.Adapter == "observed" {
+			continue
+		}
+		s := a.Name
+		if model := a.LiveModel(); model != "" {
+			s += ":" + model
+		}
+		if u := a.Usage(); u != "" {
+			s += "·" + u
+		}
+		parts = append(parts, s)
+	}
+	if len(parts) == 0 {
+		return "usage — no live agents"
+	}
+	return "usage — " + strings.Join(parts, "  ")
+}
+
 // refresh polls the orchestrator and reloads view data.
 func (m *model) refresh() {
 	m.o.Poll()
@@ -395,6 +440,12 @@ func (m *model) refresh() {
 	}
 	if msgs, err := m.o.Store.ListMessages(500); err == nil {
 		m.msgs = msgs
+	}
+	// /clear hides everything up to the moment it was run; newer activity
+	// still flows in.
+	if !m.clearedAt.IsZero() {
+		m.events = filterEventsAfter(m.events, m.clearedAt)
+		m.msgs = filterMsgsAfter(m.msgs, m.clearedAt)
 	}
 	if ts, err := m.o.Tasks.List(); err == nil {
 		m.tasks = ts
@@ -1411,6 +1462,44 @@ func (m model) execCommand(line string) (tea.Model, tea.Cmd) {
 			fmt.Sprintf("You are assigned task %s: %s", t.ID, t.Title),
 			messaging.SendOpts{Type: domain.MsgTask, TaskID: t.ID})
 		m.feedback = okStyle.Render("assigned " + t.ID + " to " + t.Owner)
+	case "/goal":
+		if len(args) < 1 {
+			if g := m.o.Loop().Goal; g != "" {
+				m.feedback = "team goal: " + g
+			} else {
+				m.feedback = warnStyle.Render("usage: /goal <text…>  (sets a shared team goal)")
+			}
+			break
+		}
+		if err := m.o.SetGoal(strings.Join(args, " ")); err != nil {
+			m.feedback = errStyle.Render(err.Error())
+		} else {
+			m.feedback = okStyle.Render("team goal set and shared with all agents")
+		}
+	case "/loop":
+		switch {
+		case len(args) >= 1 && args[0] == "stop":
+			_ = m.o.StopLoop()
+			m.feedback = okStyle.Render("team loop stopped")
+		case len(args) < 1:
+			if ls := m.o.Loop(); ls.Active {
+				m.feedback = "loop running toward: " + ls.Goal + "  (/loop stop)"
+			} else {
+				m.feedback = warnStyle.Render("usage: /loop <task…>  ·  /loop stop")
+			}
+		default:
+			if err := m.o.StartLoop(strings.Join(args, " ")); err != nil {
+				m.feedback = errStyle.Render(err.Error())
+			} else {
+				m.feedback = okStyle.Render("team loop started — agents keep working until /loop stop")
+			}
+		}
+	case "/usage":
+		m.feedback = m.usageSummary()
+	case "/clear":
+		m.clearedAt = time.Now()
+		m.msgs = nil
+		m.feedback = okStyle.Render("activity cleared (per-agent context: @agent /clear)")
 	default:
 		m.feedback = warnStyle.Render("unknown command " + cmd + " (/help)")
 	}
@@ -1441,6 +1530,9 @@ func (m model) View() string {
 			m.o.Session.ID, m.o.Cfg.SessionName(), len(m.rows)))
 	if m.pending > 0 {
 		head += "  " + warnStyle.Render(fmt.Sprintf("⚠ %d approval(s) pending — /grant <id>", m.pending))
+	}
+	if ls := m.o.Loop(); ls.Active {
+		head += "  " + okStyle.Render("⟳ loop: "+truncLine(ls.Goal, 40))
 	}
 
 	var body string

@@ -62,6 +62,7 @@ func (o *Orchestrator) Poll() {
 	}
 	if panesTrusted {
 		o.DeliverQueued()
+		o.driveLoop()
 	}
 	o.runDueRestarts()
 }

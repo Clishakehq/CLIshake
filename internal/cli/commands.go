@@ -577,6 +577,50 @@ func newCleanCmd() *cobra.Command {
 	}
 }
 
+func newLoopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "loop <task...> | stop | status",
+		Short: "Start/stop the team loop: keep every agent working toward a shared goal",
+		Long: `The team loop is the clishake-level analogue of a harness "/loop": it sets a
+shared goal, tells every agent to work toward it, and the supervisor re-engages
+any agent that goes idle until the loop is stopped.
+
+  clishake loop Ship the auth refactor with tests green
+  clishake loop status
+  clishake loop stop     # any agent that finishes the goal can end the loop`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o, err := open()
+			if err != nil {
+				return err
+			}
+			defer o.Close()
+			switch {
+			case args[0] == "stop":
+				if err := o.StopLoop(); err != nil {
+					return err
+				}
+				fmt.Println("team loop stopped")
+			case args[0] == "status":
+				ls := o.Loop()
+				if ls.Active {
+					fmt.Printf("loop active — goal: %s\n", ls.Goal)
+				} else if ls.Goal != "" {
+					fmt.Printf("loop stopped — last goal: %s\n", ls.Goal)
+				} else {
+					fmt.Println("no team loop")
+				}
+			default:
+				if err := o.StartLoop(strings.Join(args, " ")); err != nil {
+					return err
+				}
+				fmt.Println("team loop started — agents will keep working until `clishake loop stop`")
+			}
+			return nil
+		},
+	}
+}
+
 func newNoteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "note <text...>",

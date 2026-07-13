@@ -43,6 +43,7 @@ type Orchestrator struct {
 	history    map[string][]time.Time // agent ID -> recent failure times (crash-loop window)
 	discovered map[string]time.Time   // agent ID -> last sub-agent discovery scan
 	statusAt   map[string]time.Time   // agent ID -> last live-status (model/usage) read
+	loopNudged map[string]time.Time   // agent ID -> last team-loop nudge
 }
 
 // ClishakeDir returns the .clishake directory for a project.
@@ -74,6 +75,7 @@ func InitProject(projectDir string) (bool, error) {
 		content := `# clishake runtime state — never commit
 state.db*
 events.jsonl
+loop.json
 agents/
 logs/
 worktrees/
@@ -117,6 +119,7 @@ func Open(projectDir string, reg *adapter.Registry) (*Orchestrator, error) {
 		history:    map[string][]time.Time{},
 		discovered: map[string]time.Time{},
 		statusAt:   map[string]time.Time{},
+		loopNudged: map[string]time.Time{},
 	}
 	sess, err := st.GetSession()
 	if err != nil {
